@@ -170,11 +170,11 @@ class Smartthings extends utils.Adapter {
                         let data = res.data;
                         let keys = Object.keys(data);
                         if (keys.length === 1) {
-                            data = res.data[keys[0]];
+                            data = data[keys[0]];
                         }
                         keys = Object.keys(data);
                         if (keys.length === 1) {
-                            data = res.data[keys[0]];
+                            data = data[keys[0]];
                         }
                         const forceIndex = null;
                         const preferedArrayName = null;
