@@ -64,6 +64,7 @@ class Smartthings extends utils.Adapter {
             .then(async (res) => {
                 this.log.debug(JSON.stringify(res.data));
 
+                this.setState("info.connection", true, true);
                 for (const device of res.data.items) {
                     this.deviceArray.push(device.deviceId);
                     await this.setObjectNotExistsAsync(device.deviceId, {
@@ -73,13 +74,13 @@ class Smartthings extends utils.Adapter {
                         },
                         native: {},
                     });
-                    // await this.setObjectNotExistsAsync(device.deviceId + ".remote", {
-                    //     type: "channel",
-                    //     common: {
-                    //         name: "Remote Controls",
-                    //     },
-                    //     native: {},
-                    // });
+                    await this.setObjectNotExistsAsync(device.deviceId + ".capabilities", {
+                        type: "channel",
+                        common: {
+                            name: "Capabilities/Remote Controls",
+                        },
+                        native: {},
+                    });
                     await this.setObjectNotExistsAsync(device.deviceId + ".general", {
                         type: "channel",
                         common: {
@@ -89,19 +90,22 @@ class Smartthings extends utils.Adapter {
                     });
 
                     const remoteArray = [];
-                    remoteArray.forEach((remote) => {
-                        this.setObjectNotExists(device.deviceId + ".remote." + remote.command, {
-                            type: "state",
-                            common: {
-                                name: remote.name || "",
-                                type: remote.type || "boolean",
-                                role: remote.role || "boolean",
-                                write: true,
-                                read: true,
-                            },
-                            native: {},
+                    if (device.components && device.components[0] && device.components[0].capabilities) {
+                        device.components[0].capabilities.forEach((capability) => {
+                            const idName = capability.id.replace(/\./g, "-");
+                            this.setObjectNotExists(device.deviceId + ".capabilities." + idName, {
+                                type: "state",
+                                common: {
+                                    name: "",
+                                    type: "mixed",
+                                    role: "state",
+                                    write: true,
+                                    read: true,
+                                },
+                                native: {},
+                            });
                         });
-                    });
+                    }
                     this.json2iob.parse(device.deviceId + ".general", device);
                     await this.requestClient({
                         method: "get",
@@ -217,12 +221,13 @@ class Smartthings extends utils.Adapter {
         if (state) {
             if (!state.ack) {
                 const deviceId = id.split(".")[2];
-                const command = id.split(".")[4];
-                const data = {};
+                let commandId = id.split(".")[4];
+                commandId = commandId.replace(/\-/g, ".");
+                const data = { commands: [{ capability: commandId, command: commandId }] };
                 this.log.debug(JSON.stringify(data));
                 await this.requestClient({
                     method: "post",
-                    url: "",
+                    url: "https://api.smartthings.com/v1/devices/" + deviceId + "/commands",
                     headers: {
                         "User-Agent": "ioBroker",
                         Authorization: "Bearer " + this.config.token,
@@ -230,7 +235,7 @@ class Smartthings extends utils.Adapter {
                     data: data,
                 })
                     .then((res) => {
-                        this.log.debug(JSON.stringify(res.data));
+                        this.log.info(JSON.stringify(res.data));
                         return res.data;
                     })
                     .catch((error) => {
