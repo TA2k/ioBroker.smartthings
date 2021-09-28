@@ -65,6 +65,7 @@ class Smartthings extends utils.Adapter {
                 this.log.debug(JSON.stringify(res.data));
 
                 this.setState("info.connection", true, true);
+                this.log.info(res.data.items.length + " devices detected");
                 for (const device of res.data.items) {
                     this.deviceArray.push(device.deviceId);
                     await this.setObjectNotExistsAsync(device.deviceId, {
