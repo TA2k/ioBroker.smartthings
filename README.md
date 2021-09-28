@@ -23,7 +23,7 @@ Geben Sie einen Namen für das neue Token an. Wählen Sie im Abschnitt „Autori
 Tippen Sie auf die Schaltfläche \"Token generieren\", wenn Sie fertig sind, und Sie kehren zur Seite \"Persönliche Zugriffstoken\" zurück.  Kopieren Sie das neu generierte Token und bewahren Sie es an einem sicheren Ort auf. Dies ist Ihre einzige Möglichkeit, den neu generierten Tokenwert abzurufen.
 
 ## Steuern
-smartthings.0.id.capabilities  ein beliebigen Wert setzen
+smartthings.0.id.capabilities entweder true setzen oder ein vorgegebenen Wert setzen  
 
 ## Diskussion und Fragen:
 https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
@@ -31,7 +31,7 @@ https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
 
 ## Changelog
 
-* (TA2k) initial release
+* 0.0.1 (TA2k) initial release
 
 ## License
 MIT License
