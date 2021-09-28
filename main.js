@@ -91,19 +91,48 @@ class Smartthings extends utils.Adapter {
 
                     const remoteArray = [];
                     if (device.components && device.components[0] && device.components[0].capabilities) {
-                        device.components[0].capabilities.forEach((capability) => {
-                            const idName = capability.id.replace(/\./g, "-");
-                            this.setObjectNotExists(device.deviceId + ".capabilities." + idName, {
-                                type: "state",
-                                common: {
-                                    name: "",
-                                    type: "mixed",
-                                    role: "state",
-                                    write: true,
-                                    read: true,
+                        device.components[0].capabilities.forEach(async (capability) => {
+                            await this.requestClient({
+                                method: "get",
+                                url: "https://api.smartthings.com/v1/capabilities/" + capability.id + "/" + capability.version,
+                                headers: {
+                                    "User-Agent": "ioBroker",
+                                    Authorization: "Bearer " + this.config.token,
                                 },
-                                native: {},
-                            });
+                            })
+                                .then(async (res) => {
+                                    this.log.debug(JSON.stringify(res.data));
+                                    let idName = res.data.id;
+                                    Object.keys(res.data.commands).forEach((element) => {
+                                        let common = {
+                                            name: "",
+                                            type: "boolean",
+                                            role: "boolean",
+                                            write: true,
+                                            read: true,
+                                        };
+                                        let letsubIdName = idName + "-" + element;
+                                        if (res.data.commands[element].arguments[0]) {
+                                            common.type = res.data.commands[element].arguments[0].schema.type;
+                                            common.role = "state";
+                                            if (res.data.commands[element].arguments[0].schema.enum) {
+                                                common.states = {};
+                                                res.data.commands[element].arguments[0].schema.enum.forEach((enumElement) => {
+                                                    common.states[enumElement] = enumElement;
+                                                });
+                                            }
+                                        }
+                                        this.setObjectNotExists(device.deviceId + ".capabilities." + letsubIdName, {
+                                            type: "state",
+                                            common: common,
+                                            native: {},
+                                        });
+                                    });
+                                })
+                                .catch((error) => {
+                                    this.log.error(error);
+                                    error.response && this.log.error(JSON.stringify(error.response.data));
+                                });
                         });
                     }
                     this.json2iob.parse(device.deviceId + ".general", device);
@@ -220,11 +249,17 @@ class Smartthings extends utils.Adapter {
     async onStateChange(id, state) {
         if (state) {
             if (!state.ack) {
-                const deviceId = id.split(".")[2];
-                let commandId = id.split(".")[4];
-                commandId = commandId.replace(/\-/g, ".");
-                const data = { commands: [{ capability: commandId, command: commandId }] };
-                this.log.debug(JSON.stringify(data));
+                let idArray = id.split(".");
+                const deviceId = idArray[2];
+                idArray.splice(0, 4);
+                let capadId = idArray.join(".");
+                let commandId = capadId.split("-")[1];
+                capadId = capadId.split("-")[0];
+                const data = { commands: [{ capability: capadId, command: commandId }] };
+                if (typeof state.val !== "boolean") {
+                    data.commands[0].arguments = [state.val];
+                }
+                this.log.info(JSON.stringify(data));
                 await this.requestClient({
                     method: "post",
                     url: "https://api.smartthings.com/v1/devices/" + deviceId + "/commands",
