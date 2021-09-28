@@ -103,6 +103,31 @@ class Smartthings extends utils.Adapter {
                         });
                     });
                     this.json2iob.parse(device.deviceId + ".general", device);
+                    await this.requestClient({
+                        method: "get",
+                        url: "https://api.smartthings.com/v1/devices/" + device.deviceId + "/states",
+                        headers: {
+                            "User-Agent": "ioBroker",
+                            Authorization: "Bearer " + this.config.token,
+                        },
+                    })
+                        .then(async (res) => {
+                            this.log.debug(JSON.stringify(res.data));
+                            let data = res.data;
+                            let keys = Object.keys(data);
+                            if (keys.length === 1) {
+                                data = res.data[keys[0]];
+                            }
+                            keys = Object.keys(res.data);
+                            if (keys.length === 1) {
+                                data = res.data[keys[0]];
+                            }
+                            this.json2iob.parse(device.deviceId + ".states", data);
+                        })
+                        .catch((error) => {
+                            this.log.error(error);
+                            error.response && this.log.error(JSON.stringify(error.response.data));
+                        });
                 }
             })
             .catch((error) => {
