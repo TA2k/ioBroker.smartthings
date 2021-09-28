@@ -16,7 +16,7 @@
 Adapter for Samsung Smartthings
 
 ## Loginablauf:
-Besuchen Sie den Link.  https://account.smartthings.com/tokens
+Besuchen Sie den Link.  https://account.smartthings.com/tokens  
 Melden Sie sich mit Ihrem Samsung-Konto an, um zur Seite \"Persönliche Zugriffstoken\" zu gelangen.  
 Tippen Sie auf die Schaltfläche „Neuen Token generieren“, um auf die Seite „Neuer Zugriffstoken“ zu gelangen.  
 Geben Sie einen Namen für das neue Token an. Wählen Sie im Abschnitt „Autorisierte Bereiche“ eine beliebige Funktionalität aus, die Sie für das Token autorisieren möchten.  
