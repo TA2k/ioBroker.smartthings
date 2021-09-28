@@ -26,7 +26,7 @@ Tippen Sie auf die Schaltfläche \"Token generieren\", wenn Sie fertig sind, und
 
 
 ## Diskussion und Fragen:
-https://forum.iobroker.net/topic/48074/test-adapter-renault-v0-0-x
+https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
 
 
 ## Changelog
