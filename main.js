@@ -172,7 +172,7 @@ class Smartthings extends utils.Adapter {
                         if (keys.length === 1) {
                             data = res.data[keys[0]];
                         }
-                        keys = Object.keys(res.data);
+                        keys = Object.keys(data);
                         if (keys.length === 1) {
                             data = res.data[keys[0]];
                         }
