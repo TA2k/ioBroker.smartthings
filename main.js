@@ -103,16 +103,16 @@ class Smartthings extends utils.Adapter {
                             })
                                 .then(async (res) => {
                                     this.log.debug(JSON.stringify(res.data));
-                                    let idName = res.data.id;
+                                    const idName = res.data.id;
                                     Object.keys(res.data.commands).forEach((element) => {
-                                        let common = {
+                                        const common = {
                                             name: "",
                                             type: "boolean",
                                             role: "boolean",
                                             write: true,
                                             read: true,
                                         };
-                                        let letsubIdName = idName + "-" + element;
+                                        const letsubIdName = idName + "-" + element;
                                         if (res.data.commands[element].arguments[0]) {
                                             common.type = res.data.commands[element].arguments[0].schema.type;
                                             common.role = "state";
@@ -137,31 +137,6 @@ class Smartthings extends utils.Adapter {
                         });
                     }
                     this.json2iob.parse(device.deviceId + ".general", device);
-                    await this.requestClient({
-                        method: "get",
-                        url: "https://api.smartthings.com/v1/devices/" + device.deviceId + "/states",
-                        headers: {
-                            "User-Agent": "ioBroker",
-                            Authorization: "Bearer " + this.config.token,
-                        },
-                    })
-                        .then(async (res) => {
-                            this.log.debug(JSON.stringify(res.data));
-                            let data = res.data;
-                            let keys = Object.keys(data);
-                            if (keys.length === 1) {
-                                data = res.data[keys[0]];
-                            }
-                            keys = Object.keys(res.data);
-                            if (keys.length === 1) {
-                                data = res.data[keys[0]];
-                            }
-                            this.json2iob.parse(device.deviceId + ".states", data);
-                        })
-                        .catch((error) => {
-                            this.log.error(error);
-                            error.response && this.log.error(JSON.stringify(error.response.data));
-                        });
                 }
             })
             .catch((error) => {
@@ -250,11 +225,11 @@ class Smartthings extends utils.Adapter {
     async onStateChange(id, state) {
         if (state) {
             if (!state.ack) {
-                let idArray = id.split(".");
+                const idArray = id.split(".");
                 const deviceId = idArray[2];
                 idArray.splice(0, 4);
                 let capadId = idArray.join(".");
-                let commandId = capadId.split("-")[1];
+                const commandId = capadId.split("-")[1];
                 capadId = capadId.split("-")[0];
                 const data = { commands: [{ capability: capadId, command: commandId }] };
                 if (typeof state.val !== "boolean") {
