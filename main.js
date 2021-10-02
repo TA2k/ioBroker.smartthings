@@ -29,9 +29,9 @@ class Smartthings extends utils.Adapter {
     async onReady() {
         // Reset the connection indicator during startup
         this.setState("info.connection", false, true);
-        if (this.config.interval < 0.5) {
-            this.log.info("Set interval to minimum 0.5");
-            this.config.interval = 0.5;
+        if (this.config.interval < 1) {
+            this.log.info("Set interval to minimum 1");
+            this.config.interval = 1;
         }
         this.requestClient = axios.create();
         this.updateInterval = null;
@@ -46,7 +46,12 @@ class Smartthings extends utils.Adapter {
             await this.updateDevices();
             this.updateInterval = setInterval(async () => {
                 await this.updateDevices();
-            }, this.config.interval * 60 * 1000);
+            }, this.config.interval * 1000);
+            if (this.config.virtualInterval > 0) {
+                this.updateVirtualInterval = setInterval(async () => {
+                    await this.updateDevices(true);
+                }, this.config.virtualInterval * 1000);
+            }
         } else {
             this.log.info("Please enter a Samsung Smartthings Token");
         }
@@ -67,7 +72,7 @@ class Smartthings extends utils.Adapter {
                 this.setState("info.connection", true, true);
                 this.log.info(res.data.items.length + " devices detected");
                 for (const device of res.data.items) {
-                    this.deviceArray.push(device.deviceId);
+                    this.deviceArray.push({ id: device.deviceId, type: device.deviceTypeName });
                     await this.setObjectNotExistsAsync(device.deviceId, {
                         type: "device",
                         common: {
@@ -145,7 +150,7 @@ class Smartthings extends utils.Adapter {
             });
     }
 
-    async updateDevices() {
+    async updateDevices(onlyVirtualSwitch) {
         const statusArray = [
             {
                 path: "status",
@@ -158,9 +163,14 @@ class Smartthings extends utils.Adapter {
             "User-Agent": "ioBroker",
             Authorization: "Bearer " + this.config.token,
         };
-        this.deviceArray.forEach(async (id) => {
+        this.deviceArray.forEach(async (device) => {
+            if (onlyVirtualSwitch) {
+                if (device.type !== "Virtual Switch") {
+                    return;
+                }
+            }
             statusArray.forEach(async (element) => {
-                const url = element.url.replace("$id", id);
+                const url = element.url.replace("$id", device.id);
 
                 await this.requestClient({
                     method: "get",
@@ -184,7 +194,7 @@ class Smartthings extends utils.Adapter {
                         const forceIndex = null;
                         const preferedArrayName = null;
 
-                        this.json2iob.parse(id + "." + element.path, data, { forceIndex: forceIndex, preferedArrayName: preferedArrayName, channelName: element.desc });
+                        this.json2iob.parse(device.id + "." + element.path, data, { forceIndex: forceIndex, preferedArrayName: preferedArrayName, channelName: element.desc });
                     })
                     .catch((error) => {
                         if (error.response && error.response.status === 401) {
@@ -211,6 +221,7 @@ class Smartthings extends utils.Adapter {
             this.setState("info.connection", false, true);
             clearTimeout(this.refreshTimeout);
             clearInterval(this.updateInterval);
+            clearInterval(this.updateVirtualInterval);
             callback();
         } catch (e) {
             callback();

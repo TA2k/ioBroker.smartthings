@@ -88,11 +88,18 @@
             </div>
 
             <div class="row">
-                <div class="col s2 input-field">
+                <div class="col s12 input-field">
+                    <div class="translate">350 request per 60 seconds allowed. Each device is 1 request per interval.</div>
                     <input type="number" class="value" id="interval" />
-                    <label for="interval" class="translate">Update interval in minutes</label>
+                    <label for="interval" class="translate">Update interval (in seconds)</label>
                 </div>
             </div>
+            <div class="row">
+                <div class="col s12 input-field">
+                    <input type="number" class="value" id="virtualInterval" />
+                    <label for="virtualInterval" class="translate">Additional Update interval for Virtual Switch, they are also refreshed with the normal interval (in seconds, 0 for deactivate)</label>
+                </div>
+            </div></div>
         </div>
     </body>
 </html>
