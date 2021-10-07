@@ -120,6 +120,9 @@ class Smartthings extends utils.Adapter {
                                         const letsubIdName = idName + "-" + element;
                                         if (res.data.commands[element].arguments[0]) {
                                             common.type = res.data.commands[element].arguments[0].schema.type;
+                                            if (common.type === "integer") {
+                                                common.type = "number";
+                                            }
                                             common.role = "state";
                                             if (res.data.commands[element].arguments[0].schema.enum) {
                                                 common.states = {};
