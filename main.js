@@ -129,12 +129,16 @@ class Smartthings extends utils.Adapter {
                                                 const ocfDeviceCommands = ocfDevice.getOcfCommands();
                                                 for (const ocfDeviceCommandName in ocfDeviceCommands) {
                                                     const ocfDeviceCommand = ocfDeviceCommands[ocfDeviceCommandName];
-                                                    this.setObjectNotExists(device.deviceId + ".capabilities." + letsubIdName + "." + ocfDeviceCommandName, {
+
+                                                    const objectRaw = {
                                                         type: "state",
                                                         common: {
                                                             name: "",
-                                                            type: ocfDeviceCommand.type,
-                                                            role: ocfDeviceCommand.type,
+                                                            type: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
+                                                            role: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
+                                                            min: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.min ? ocfDeviceCommand.iobroker.min : 0,
+                                                            max: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.max ? ocfDeviceCommand.iobroker.max : 0,
+                                                            states: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.states ? ocfDeviceCommand.iobroker.states : null,
                                                             write: true,
                                                             read: true
                                                         },
@@ -145,7 +149,8 @@ class Smartthings extends utils.Adapter {
                                                             deviceId: device.deviceId,
                                                             commandName: ocfDeviceCommandName
                                                         }
-                                                    });
+                                                    };
+                                                    this.setObjectNotExists(device.deviceId + ".capabilities." + letsubIdName + "." + ocfDeviceCommandName, objectRaw);
                                                 }
                                                 commandCreated = true;
                                             }
