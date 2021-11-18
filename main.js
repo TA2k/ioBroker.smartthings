@@ -9,6 +9,8 @@
 const utils = require("@iobroker/adapter-core");
 const axios = require("axios");
 const Json2iob = require("./lib/json2iob");
+const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
+
 class Smartthings extends utils.Adapter {
     /**
      * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -39,6 +41,7 @@ class Smartthings extends utils.Adapter {
         this.json2iob = new Json2iob(this);
         this.deviceArray = [];
         this.session = {};
+        this.ocfDeviceFactory = new OcfDeviceFactory();
         this.subscribeStates("*");
 
         if (this.config.token) {
@@ -118,24 +121,61 @@ class Smartthings extends utils.Adapter {
                                             read: true,
                                         };
                                         const letsubIdName = idName + "-" + element;
-                                        if (res.data.commands[element].arguments[0]) {
-                                            common.type = res.data.commands[element].arguments[0].schema.type;
-                                            if (common.type === "integer") {
-                                                common.type = "number";
-                                            }
-                                            common.role = "state";
-                                            if (res.data.commands[element].arguments[0].schema.enum) {
-                                                common.states = {};
-                                                res.data.commands[element].arguments[0].schema.enum.forEach((enumElement) => {
-                                                    common.states[enumElement] = enumElement;
-                                                });
+
+                                        let commandCreated = false;
+                                        if (idName === "ocf" && element === "postOcfCommand") {
+                                            const ocfDevice = this.ocfDeviceFactory.getOcfDevice(device.deviceManufacturerCode, device.presentationId);
+                                            if (ocfDevice) {
+                                                const ocfDeviceCommands = ocfDevice.getOcfCommands();
+                                                for (const ocfDeviceCommandName in ocfDeviceCommands) {
+                                                    const ocfDeviceCommand = ocfDeviceCommands[ocfDeviceCommandName];
+
+                                                    const objectRaw = {
+                                                        type: "state",
+                                                        common: {
+                                                            name: "",
+                                                            type: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
+                                                            role: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
+                                                            min: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.min ? ocfDeviceCommand.iobroker.min : 0,
+                                                            max: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.max ? ocfDeviceCommand.iobroker.max : 0,
+                                                            states: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.states ? ocfDeviceCommand.iobroker.states : null,
+                                                            write: true,
+                                                            read: true
+                                                        },
+                                                        native: {
+                                                            type: "OcfCommand",
+                                                            deviceManufacturerCode: device.deviceManufacturerCode,
+                                                            presentationId: device.presentationId,
+                                                            deviceId: device.deviceId,
+                                                            commandName: ocfDeviceCommandName
+                                                        }
+                                                    };
+                                                    this.setObjectNotExists(device.deviceId + ".capabilities." + letsubIdName + "." + ocfDeviceCommandName, objectRaw);
+                                                }
+                                                commandCreated = true;
                                             }
                                         }
-                                        this.setObjectNotExists(device.deviceId + ".capabilities." + letsubIdName, {
-                                            type: "state",
-                                            common: common,
-                                            native: {},
-                                        });
+
+                                        if (!commandCreated) {
+                                            if (res.data.commands[element].arguments[0]) {
+                                                common.type = res.data.commands[element].arguments[0].schema.type;
+                                                if (common.type === "integer") {
+                                                    common.type = "number";
+                                                }
+                                                common.role = "state";
+                                                if (res.data.commands[element].arguments[0].schema.enum) {
+                                                    common.states = {};
+                                                    res.data.commands[element].arguments[0].schema.enum.forEach((enumElement) => {
+                                                        common.states[enumElement] = enumElement;
+                                                    });
+                                                }
+                                            }
+                                            this.setObjectNotExists(device.deviceId + ".capabilities." + letsubIdName, {
+                                                type: "state",
+                                                common: common,
+                                                native: {},
+                                            });
+                                        }
                                     });
                                 })
                                 .catch((error) => {
@@ -245,10 +285,20 @@ class Smartthings extends utils.Adapter {
                 let capadId = idArray.join(".");
                 const commandId = capadId.split("-")[1];
                 capadId = capadId.split("-")[0];
-                const data = { commands: [{ capability: capadId, command: commandId }] };
+
+                let data = { commands: [{ capability: capadId, command: commandId }] };
                 if (typeof state.val !== "boolean") {
                     data.commands[0].arguments = [state.val];
                 }
+
+                if (capadId === "ocf" && commandId.startsWith("postOcfCommand")) {
+                    const commandObject = await this.getForeignObjectAsync(id).then(result => result);
+                    const candidate = this.ocfDeviceFactory.getOcfCommandData(commandObject.native.deviceManufacturerCode, commandObject.native.presentationId, commandObject.native.deviceId, commandObject.native.commandName, state.val);
+                    if (candidate !== null) {
+                        data = candidate;
+                    }
+                }
+
                 this.log.info(JSON.stringify(data));
                 await this.requestClient({
                     method: "post",
