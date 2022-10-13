@@ -30,7 +30,6 @@ class Smartthings extends utils.Adapter {
     this.deviceArray = [];
     this.session = {};
     this.ocfDeviceFactory = new OcfDeviceFactory();
-    this.subscribeStates("*");
   }
 
   /**
@@ -44,6 +43,7 @@ class Smartthings extends utils.Adapter {
       this.config.interval = 1;
     }
 
+    this.subscribeStates("*");
     if (this.config.token) {
       await this.getDeviceList();
       await this.updateDevices();
