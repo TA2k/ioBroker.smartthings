@@ -1,111 +1,106 @@
 {
-    "common": {
-        "name": "smartthings",
-        "version": "0.0.1",
-        "news": {
-            "0.0.1": {
-                "en": "initial release",
-                "de": "Erstveröffentlichung",
-                "ru": "Начальная версия",
-                "pt": "lançamento inicial",
-                "nl": "Eerste uitgave",
-                "fr": "Première version",
-                "it": "Versione iniziale",
-                "es": "Versión inicial",
-                "pl": "Pierwsze wydanie",
-                "zh-cn": "首次出版"
-            }
-        },
-        "title": "Samsung Smartthings",
-        "titleLang": {
-            "en": "Samsung Smartthings",
-            "de": "Samsung Smartthings",
-            "ru": "Смартфоны Samsung",
-            "pt": "Samsung Smartthings",
-            "nl": "Samsung Smartthings",
-            "fr": "Samsung Smartthings",
-            "it": "Samsung Smartthings",
-            "es": "Samsung Smartthings",
-            "pl": "Inteligentne urządzenia Samsung",
-            "zh-cn": "三星智能"
-        },
-        "desc": {
-            "en": "Adapter for Samsung Smartthings",
-            "de": "Adapter für Samsung Smartthings",
-            "ru": "Адаптер для Samsung Smartthings",
-            "pt": "Adaptador para Samsung Smartthings",
-            "nl": "Adapter voor Samsung Smartthings",
-            "fr": "Adaptateur pour Samsung Smartthings",
-            "it": "Adattatore per Samsung Smartthings",
-            "es": "Adaptador para Samsung Smartthings",
-            "pl": "Adapter do Samsung Smartthings",
-            "zh-cn": "适用于三星 Smartthings 的适配器"
-        },
-        "authors": [
-            "TA2k <tombox2020@gmail.com>"
-        ],
-        "keywords": [
-            "samsung",
-            "smartthings"
-        ],
-        "license": "MIT",
-        "platform": "Javascript/Node.js",
-        "main": "main.js",
-        "icon": "smartthings.png",
-        "enabled": true,
-        "extIcon": "https://raw.githubusercontent.com/TA2k/ioBroker.smartthings/master/admin/smartthings.png",
-        "readme": "https://github.com/TA2k/ioBroker.smartthings/blob/master/README.md",
-        "loglevel": "info",
-        "mode": "daemon",
-        "type": "household",
-        "compact": true,
-        "connectionType": "cloud",
-        "dataSource": "poll",
-        "materialize": true,
-        "dependencies": [
-            {
-                "js-controller": ">=3.0.0"
-            }
-        ],
-        "globalDependencies": [
-            {
-                "admin": ">=4.0.9"
-            }
-        ]
+  "common": {
+    "name": "smartthings",
+    "version": "0.0.2",
+    "news": {
+      "0.0.2": {
+        "en": "Reduced cpu load while writing states",
+        "de": "CPU-Last reduziert beim Schreiben von States"
+      },
+      "0.0.1": {
+        "en": "initial release",
+        "de": "Erstveröffentlichung",
+        "ru": "Начальная версия",
+        "pt": "lançamento inicial",
+        "nl": "Eerste uitgave",
+        "fr": "Première version",
+        "it": "Versione iniziale",
+        "es": "Versión inicial",
+        "pl": "Pierwsze wydanie",
+        "zh-cn": "首次出版"
+      }
     },
-    "encryptedNative": [
-        "token"
-    ],
-    "protectedNative": [
-        "token"
-    ],
-    "native": {
-        "token": "",
-        "interval": 10,
-        "virtualInterval": 0
+    "title": "Samsung Smartthings",
+    "titleLang": {
+      "en": "Samsung Smartthings",
+      "de": "Samsung Smartthings",
+      "ru": "Смартфоны Samsung",
+      "pt": "Samsung Smartthings",
+      "nl": "Samsung Smartthings",
+      "fr": "Samsung Smartthings",
+      "it": "Samsung Smartthings",
+      "es": "Samsung Smartthings",
+      "pl": "Inteligentne urządzenia Samsung",
+      "zh-cn": "三星智能"
     },
-    "objects": [],
-    "instanceObjects": [
-        {
-            "_id": "info",
-            "type": "channel",
-            "common": {
-                "name": "Information"
-            },
-            "native": {}
-        },
-        {
-            "_id": "info.connection",
-            "type": "state",
-            "common": {
-                "role": "indicator.connected",
-                "name": "Device or service connected",
-                "type": "boolean",
-                "read": true,
-                "write": false,
-                "def": false
-            },
-            "native": {}
-        }
+    "desc": {
+      "en": "Adapter for Samsung Smartthings",
+      "de": "Adapter für Samsung Smartthings",
+      "ru": "Адаптер для Samsung Smartthings",
+      "pt": "Adaptador para Samsung Smartthings",
+      "nl": "Adapter voor Samsung Smartthings",
+      "fr": "Adaptateur pour Samsung Smartthings",
+      "it": "Adattatore per Samsung Smartthings",
+      "es": "Adaptador para Samsung Smartthings",
+      "pl": "Adapter do Samsung Smartthings",
+      "zh-cn": "适用于三星 Smartthings 的适配器"
+    },
+    "authors": ["TA2k <tombox2020@gmail.com>"],
+    "keywords": ["samsung", "smartthings"],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "main": "main.js",
+    "icon": "smartthings.png",
+    "enabled": true,
+    "extIcon": "https://raw.githubusercontent.com/TA2k/ioBroker.smartthings/master/admin/smartthings.png",
+    "readme": "https://github.com/TA2k/ioBroker.smartthings/blob/master/README.md",
+    "loglevel": "info",
+    "mode": "daemon",
+    "type": "household",
+    "compact": true,
+    "connectionType": "cloud",
+    "dataSource": "poll",
+    "materialize": true,
+    "dependencies": [
+      {
+        "js-controller": ">=3.0.0"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=4.0.9"
+      }
     ]
+  },
+  "encryptedNative": ["token"],
+  "protectedNative": ["token"],
+  "native": {
+    "token": "",
+    "interval": 10,
+    "virtualInterval": 0
+  },
+  "objects": [],
+  "instanceObjects": [
+    {
+      "_id": "info",
+      "type": "channel",
+      "common": {
+        "name": "Information"
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.connection",
+      "type": "state",
+      "common": {
+        "role": "indicator.connected",
+        "name": "Device or service connected",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    }
+  ]
 }
