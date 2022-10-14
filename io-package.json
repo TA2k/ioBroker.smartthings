@@ -1,9 +1,9 @@
 {
   "common": {
     "name": "smartthings",
-    "version": "0.0.2",
+    "version": "0.0.4",
     "news": {
-      "0.0.2": {
+      "0.0.4": {
         "en": "Reduced cpu load while writing states",
         "de": "CPU-Last reduziert beim Schreiben von States"
       },

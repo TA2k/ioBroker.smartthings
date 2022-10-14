@@ -1,6 +1,6 @@
 {
   "name": "iobroker.smartthings",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "Adapter for Samsung Smartthings",
   "author": {
     "name": "TA2k",
