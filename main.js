@@ -8,7 +8,7 @@
 // you need to create an adapter
 const utils = require("@iobroker/adapter-core");
 const axios = require("axios").default;
-const Json2iob = require("./lib/json2iob");
+const Json2iob = require("json2iob");
 const OcfDeviceFactory = require("./lib/ocf/ocfDeviceFactory");
 
 class Smartthings extends utils.Adapter {
@@ -138,7 +138,8 @@ class Smartthings extends utils.Adapter {
                               role: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
                               min: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.min ? ocfDeviceCommand.iobroker.min : 0,
                               max: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.max ? ocfDeviceCommand.iobroker.max : 0,
-                              states: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.states ? ocfDeviceCommand.iobroker.states : null,
+                              states:
+                                ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.states ? ocfDeviceCommand.iobroker.states : null,
                               write: true,
                               read: true,
                             },
@@ -152,7 +153,7 @@ class Smartthings extends utils.Adapter {
                           };
                           await this.setObjectNotExistsAsync(
                             device.deviceId + ".capabilities." + letsubIdName + "." + ocfDeviceCommandName,
-                            objectRaw
+                            objectRaw,
                           );
                         }
                         commandCreated = true;
@@ -306,7 +307,7 @@ class Smartthings extends utils.Adapter {
               commandObject.native.presentationId,
               commandObject.native.deviceId,
               commandObject.native.commandName,
-              state.val
+              state.val,
             );
             if (candidate !== null) {
               data = candidate;
