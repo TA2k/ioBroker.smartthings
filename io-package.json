@@ -77,7 +77,8 @@
   "native": {
     "token": "",
     "interval": 10,
-    "virtualInterval": 0
+    "virtualInterval": 0,
+    "exclude": "Cycle"
   },
   "objects": [],
   "instanceObjects": [

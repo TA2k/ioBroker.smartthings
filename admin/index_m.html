@@ -1,105 +1,126 @@
 <html>
-    <head>
-        <!-- Load ioBroker scripts and styles-->
-        <link rel="stylesheet" type="text/css" href="../../css/adapter.css" />
-        <link rel="stylesheet" type="text/css" href="../../lib/css/materialize.css" />
+  <head>
+    <!-- Load ioBroker scripts and styles-->
+    <link rel="stylesheet" type="text/css" href="../../css/adapter.css" />
+    <link rel="stylesheet" type="text/css" href="../../lib/css/materialize.css" />
 
-        <script type="text/javascript" src="../../lib/js/jquery-3.2.1.min.js"></script>
-        <script type="text/javascript" src="../../socket.io/socket.io.js"></script>
+    <script type="text/javascript" src="../../lib/js/jquery-3.2.1.min.js"></script>
+    <script type="text/javascript" src="../../socket.io/socket.io.js"></script>
 
-        <script type="text/javascript" src="../../js/translate.js"></script>
-        <script type="text/javascript" src="../../lib/js/materialize.js"></script>
-        <script type="text/javascript" src="../../js/adapter-settings.js"></script>
+    <script type="text/javascript" src="../../js/translate.js"></script>
+    <script type="text/javascript" src="../../lib/js/materialize.js"></script>
+    <script type="text/javascript" src="../../js/adapter-settings.js"></script>
 
-        <!-- Load our own files -->
-        <link rel="stylesheet" type="text/css" href="style.css" />
-        <script type="text/javascript" src="words.js"></script>
+    <!-- Load our own files -->
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <script type="text/javascript" src="words.js"></script>
 
-        <script type="text/javascript">
-            // This will be called by the admin adapter when the settings page loads
-            function load(settings, onChange) {
-                // example: select elements with id=key and class=value and insert value
-                if (!settings) return;
-                $(".value").each(function () {
-                    var $key = $(this);
-                    var id = $key.attr("id");
-                    if ($key.attr("type") === "checkbox") {
-                        // do not call onChange direct, because onChange could expect some arguments
-                        $key.prop("checked", settings[id]).on("change", () => onChange());
-                    } else {
-                        // do not call onChange direct, because onChange could expect some arguments
-                        $key.val(settings[id])
-                            .on("change", () => onChange())
-                            .on("keyup", () => onChange());
-                    }
-                });
-                onChange(false);
-                // reinitialize all the Materialize labels on the page if you are dynamically adding inputs:
-                if (M) M.updateTextFields();
-            }
+    <script type="text/javascript">
+      // This will be called by the admin adapter when the settings page loads
+      function load(settings, onChange) {
+        // example: select elements with id=key and class=value and insert value
+        if (!settings) return;
+        $(".value").each(function () {
+          var $key = $(this);
+          var id = $key.attr("id");
+          if ($key.attr("type") === "checkbox") {
+            // do not call onChange direct, because onChange could expect some arguments
+            $key.prop("checked", settings[id]).on("change", () => onChange());
+          } else {
+            // do not call onChange direct, because onChange could expect some arguments
+            $key
+              .val(settings[id])
+              .on("change", () => onChange())
+              .on("keyup", () => onChange());
+          }
+        });
+        onChange(false);
+        // reinitialize all the Materialize labels on the page if you are dynamically adding inputs:
+        if (M) M.updateTextFields();
+      }
 
-            // This will be called by the admin adapter when the user presses the save button
-            function save(callback) {
-                // example: select elements with class=value and build settings object
-                var obj = {};
-                $(".value").each(function () {
-                    var $this = $(this);
-                    if ($this.attr("type") === "checkbox") {
-                        obj[$this.attr("id")] = $this.prop("checked");
-                    } else if ($this.attr("type") === "number") {
-                        obj[$this.attr("id")] = parseFloat($this.val());
-                    } else {
-                        obj[$this.attr("id")] = $this.val();
-                    }
-                });
-                callback(obj);
-            }
-        </script>
-    </head>
+      // This will be called by the admin adapter when the user presses the save button
+      function save(callback) {
+        // example: select elements with class=value and build settings object
+        var obj = {};
+        $(".value").each(function () {
+          var $this = $(this);
+          if ($this.attr("type") === "checkbox") {
+            obj[$this.attr("id")] = $this.prop("checked");
+          } else if ($this.attr("type") === "number") {
+            obj[$this.attr("id")] = parseFloat($this.val());
+          } else {
+            obj[$this.attr("id")] = $this.val();
+          }
+        });
+        callback(obj);
+      }
+    </script>
+  </head>
 
-    <body>
-        <div class="m adapter-container">
-            <div class="row">
-                <div class="col s12 m4 l2">
-                    <img src="smartthings.png" class="logo" />
-                </div>
-            </div>
-
-            <!-- Put your content here -->
-
-            <!-- For example columns with settings: -->
-            <div class="row">
-                <div class="col s12 input-field">
-                    <div class="col s12 translate"><a href="https://account.smartthings.com/tokens" target="_blank">https://account.smartthings.com/tokens</a></div>
-                    <br />
-                    <p></p>
-                    <div class="col s12 translate">Visit the Link. Sign in with your Samsung account to be taken to the "Personal Access Tokens" page.</div>
-                    <div class="col s12 translate">Tap the “Generate new token” button, taking you to a “New Access Token” page.</div>
-                    <div class="col s12 translate">Provide a name for the new token. Select any functionality you wish to authorize for the token in the “Authorized Scopes” section.</div>
-                    <div class="col s12 translate">Tap the “Generate Token” button when ready, and you’ll return to the “Personal access tokens” page.</div>
-                    <div class="col s12 translate">Copy the newly generated token and insert in the settings.</div>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col s12 input-field">
-                    <input type="text" class="value" id="token" />
-                    <label for="token" class="translate">Smarthings Token</label>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col s12 input-field">
-                    <div class="translate">350 request per 60 seconds allowed. Each device is 1 request per interval.</div>
-                    <input type="number" class="value" id="interval" />
-                    <label for="interval" class="translate">Update interval (in seconds)</label>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col s12 input-field">
-                    <input type="number" class="value" id="virtualInterval" />
-                    <label for="virtualInterval" class="translate">Additional Update interval for Virtual Switch, they are also refreshed with the normal interval (in seconds, 0 for deactivate)</label>
-                </div>
-            </div></div>
+  <body>
+    <div class="m adapter-container">
+      <div class="row">
+        <div class="col s12 m4 l2">
+          <img src="smartthings.png" class="logo" />
         </div>
-    </body>
+      </div>
+
+      <!-- Put your content here -->
+
+      <!-- For example columns with settings: -->
+      <div class="row">
+        <div class="col s12 input-field">
+          <div class="col s12 translate">
+            <a href="https://account.smartthings.com/tokens" target="_blank">https://account.smartthings.com/tokens</a>
+          </div>
+          <br />
+          <p></p>
+          <div class="col s12 translate">
+            Visit the Link. Sign in with your Samsung account to be taken to the "Personal Access Tokens" page.
+          </div>
+          <div class="col s12 translate">Tap the “Generate new token” button, taking you to a “New Access Token” page.</div>
+          <div class="col s12 translate">
+            Provide a name for the new token. Select any functionality you wish to authorize for the token in the “Authorized Scopes”
+            section.
+          </div>
+          <div class="col s12 translate">
+            Tap the “Generate Token” button when ready, and you’ll return to the “Personal access tokens” page.
+          </div>
+          <div class="col s12 translate">Copy the newly generated token and insert in the settings.</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
+          <input type="text" class="value" id="token" />
+          <label for="token" class="translate">Smarthings Token</label>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col s12 input-field">
+          <div class="translate">350 request per 60 seconds allowed. Each device is 1 request per interval.</div>
+          <input type="number" class="value" id="interval" />
+          <label for="interval" class="translate">Update interval (in seconds)</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
+          <input type="number" class="value" id="virtualInterval" />
+          <label for="virtualInterval" class="translate"
+            >Additional Update interval for Virtual Switch, they are also refreshed with the normal interval (in seconds, 0 for
+            deactivate)</label
+          >
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
+          <input type="text" class="value" id="exclude" />
+          <label for="exclude" class="translate"
+            >Exclude States to prevent high CPU Load. Comma seperated values with State ending. Cycle => washerCycle, dryerCycle ....
+          </label>
+        </div>
+      </div>
+    </div>
+  </body>
 </html>

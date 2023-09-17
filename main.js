@@ -245,6 +245,7 @@ class Smartthings extends utils.Adapter {
               forceIndex: forceIndex,
               preferedArrayName: preferedArrayName,
               channelName: element.desc,
+              excludeStateWithEnding: this.config.exclude.replace(/ /g, "").split(","),
             });
           })
           .catch((error) => {
