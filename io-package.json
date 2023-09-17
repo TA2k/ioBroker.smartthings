@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "smartthings",
-    "version": "0.0.4",
+    "version": "0.1.0",
     "news": {
+      "0.1.0": {
+        "en": "Added object excluding to reduce cpu usage",
+        "de": "Objekt-Exklusion hinzugefügt, um die CPU-Auslastung zu reduzieren"
+      },
       "0.0.4": {
         "en": "Reduced cpu load while writing states",
         "de": "CPU-Last reduziert beim Schreiben von States"
