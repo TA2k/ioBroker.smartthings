@@ -1,8 +1,12 @@
 {
   "common": {
     "name": "smartthings",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "news": {
+      "0.1.1": {
+        "en": "Added support to exclude devices",
+        "de": "Unterstützung zum Ausschließen von Geräten hinzugefügt"
+      },
       "0.1.0": {
         "en": "Added object excluding to reduce cpu usage",
         "de": "Objekt-Exklusion hinzugefügt, um die CPU-Auslastung zu reduzieren"
