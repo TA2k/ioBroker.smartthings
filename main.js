@@ -75,6 +75,11 @@ class Smartthings extends utils.Adapter {
         this.setState("info.connection", true, true);
         this.log.info(res.data.items.length + " devices detected");
         for (const device of res.data.items) {
+          const exlcudeList = this.config.excludeDevices.replace(/ /g, "").split(",");
+          if (exlcudeList.includes(device.deviceId)) {
+            this.log.info("Exclude " + device.deviceId);
+            continue;
+          }
           this.deviceArray.push({ id: device.deviceId, type: device.deviceTypeName });
           await this.setObjectNotExistsAsync(device.deviceId, {
             type: "device",
