@@ -243,8 +243,8 @@ class Smartthings extends utils.Adapter {
             if (keys.length === 1) {
               data = data[keys[0]];
             }
-            const forceIndex = null;
-            const preferedArrayName = null;
+            const forceIndex = undefined;
+            const preferedArrayName = undefined;
 
             await this.json2iob.parse(device.id + '.' + element.path, data, {
               forceIndex: forceIndex,
