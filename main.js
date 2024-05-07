@@ -1,4 +1,4 @@
-"use strict";
+'use strict';
 
 /*
  * Created with @iobroker/create-adapter v2.0.1
@@ -6,10 +6,10 @@
 
 // The adapter-core module gives you access to the core ioBroker functions
 // you need to create an adapter
-const utils = require("@iobroker/adapter-core");
-const axios = require("axios").default;
-const Json2iob = require("json2iob");
-const OcfDeviceFactory = require("./lib/ocf/ocfDeviceFactory");
+const utils = require('@iobroker/adapter-core');
+const axios = require('axios').default;
+const Json2iob = require('json2iob');
+const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
 
 class Smartthings extends utils.Adapter {
   /**
@@ -18,11 +18,11 @@ class Smartthings extends utils.Adapter {
   constructor(options) {
     super({
       ...options,
-      name: "smartthings",
+      name: 'smartthings',
     });
-    this.on("ready", this.onReady.bind(this));
-    this.on("stateChange", this.onStateChange.bind(this));
-    this.on("unload", this.onUnload.bind(this));
+    this.on('ready', this.onReady.bind(this));
+    this.on('stateChange', this.onStateChange.bind(this));
+    this.on('unload', this.onUnload.bind(this));
     this.requestClient = axios.create();
     this.updateInterval = null;
     this.reLoginTimeout = null;
@@ -37,13 +37,13 @@ class Smartthings extends utils.Adapter {
    */
   async onReady() {
     // Reset the connection indicator during startup
-    this.setState("info.connection", false, true);
+    this.setState('info.connection', false, true);
     if (this.config.interval < 1) {
-      this.log.info("Set interval to minimum 1");
+      this.log.info('Set interval to minimum 1');
       this.config.interval = 1;
     }
 
-    this.subscribeStates("*");
+    this.subscribeStates('*');
     if (this.config.token) {
       await this.getDeviceList();
       await this.updateDevices();
@@ -56,62 +56,62 @@ class Smartthings extends utils.Adapter {
         }, this.config.virtualInterval * 1000);
       }
     } else {
-      this.log.info("Please enter a Samsung Smartthings Token");
+      this.log.info('Please enter a Samsung Smartthings Token');
     }
   }
 
   async getDeviceList() {
     await this.requestClient({
-      method: "get",
-      url: "https://api.smartthings.com/v1/devices",
+      method: 'get',
+      url: 'https://api.smartthings.com/v1/devices',
       headers: {
-        "User-Agent": "ioBroker",
-        Authorization: "Bearer " + this.config.token,
+        'User-Agent': 'ioBroker',
+        Authorization: 'Bearer ' + this.config.token,
       },
     })
       .then(async (res) => {
         this.log.debug(JSON.stringify(res.data));
 
-        this.setState("info.connection", true, true);
-        this.log.info(res.data.items.length + " devices detected");
+        this.setState('info.connection', true, true);
+        this.log.info(res.data.items.length + ' devices detected');
         for (const device of res.data.items) {
-          const exlcudeList = this.config.excludeDevices.replace(/ /g, "").split(",");
+          const exlcudeList = this.config.excludeDevices.replace(/ /g, '').split(',');
           if (exlcudeList && exlcudeList.includes(device.deviceId)) {
-            this.log.info("Ignore " + device.deviceId);
+            this.log.info('Ignore ' + device.deviceId);
             continue;
           }
           this.deviceArray.push({ id: device.deviceId, type: device.deviceTypeName });
           await this.setObjectNotExistsAsync(device.deviceId, {
-            type: "device",
+            type: 'device',
             common: {
               name: device.label,
             },
             native: {},
           });
-          await this.setObjectNotExistsAsync(device.deviceId + ".capabilities", {
-            type: "channel",
+          await this.setObjectNotExistsAsync(device.deviceId + '.capabilities', {
+            type: 'channel',
             common: {
-              name: "Capabilities/Remote Controls",
+              name: 'Capabilities/Remote Controls',
             },
             native: {},
           });
-          await this.setObjectNotExistsAsync(device.deviceId + ".general", {
-            type: "channel",
+          await this.setObjectNotExistsAsync(device.deviceId + '.general', {
+            type: 'channel',
             common: {
-              name: "General Information",
+              name: 'General Information',
             },
             native: {},
           });
 
-          const remoteArray = [];
+          // const remoteArray = [];
           if (device.components && device.components[0] && device.components[0].capabilities) {
             device.components[0].capabilities.forEach(async (capability) => {
               await this.requestClient({
-                method: "get",
-                url: "https://api.smartthings.com/v1/capabilities/" + capability.id + "/" + capability.version,
+                method: 'get',
+                url: 'https://api.smartthings.com/v1/capabilities/' + capability.id + '/' + capability.version,
                 headers: {
-                  "User-Agent": "ioBroker",
-                  Authorization: "Bearer " + this.config.token,
+                  'User-Agent': 'ioBroker',
+                  Authorization: 'Bearer ' + this.config.token,
                 },
               })
                 .then(async (res) => {
@@ -119,16 +119,16 @@ class Smartthings extends utils.Adapter {
                   const idName = res.data.id;
                   Object.keys(res.data.commands).forEach(async (element) => {
                     const common = {
-                      name: "",
-                      type: "boolean",
-                      role: "boolean",
+                      name: '',
+                      type: 'boolean',
+                      role: 'boolean',
                       write: true,
                       read: true,
                     };
-                    const letsubIdName = idName + "-" + element;
+                    const letsubIdName = idName + '-' + element;
 
                     let commandCreated = false;
-                    if (idName === "ocf" && element === "postOcfCommand") {
+                    if (idName === 'ocf' && element === 'postOcfCommand') {
                       const ocfDevice = this.ocfDeviceFactory.getOcfDevice(device.deviceManufacturerCode, device.presentationId);
                       if (ocfDevice) {
                         const ocfDeviceCommands = ocfDevice.getOcfCommands();
@@ -136,9 +136,9 @@ class Smartthings extends utils.Adapter {
                           const ocfDeviceCommand = ocfDeviceCommands[ocfDeviceCommandName];
 
                           const objectRaw = {
-                            type: "state",
+                            type: 'state',
                             common: {
-                              name: "",
+                              name: '',
                               type: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
                               role: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
                               min: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.min ? ocfDeviceCommand.iobroker.min : 0,
@@ -149,7 +149,7 @@ class Smartthings extends utils.Adapter {
                               read: true,
                             },
                             native: {
-                              type: "OcfCommand",
+                              type: 'OcfCommand',
                               deviceManufacturerCode: device.deviceManufacturerCode,
                               presentationId: device.presentationId,
                               deviceId: device.deviceId,
@@ -157,7 +157,7 @@ class Smartthings extends utils.Adapter {
                             },
                           };
                           await this.setObjectNotExistsAsync(
-                            device.deviceId + ".capabilities." + letsubIdName + "." + ocfDeviceCommandName,
+                            device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName,
                             objectRaw,
                           );
                         }
@@ -168,10 +168,10 @@ class Smartthings extends utils.Adapter {
                     if (!commandCreated) {
                       if (res.data.commands[element].arguments[0]) {
                         common.type = res.data.commands[element].arguments[0].schema.type;
-                        if (common.type === "integer") {
-                          common.type = "number";
+                        if (common.type === 'integer') {
+                          common.type = 'number';
                         }
-                        common.role = "state";
+                        common.role = 'state';
                         if (res.data.commands[element].arguments[0].schema.enum) {
                           common.states = {};
                           res.data.commands[element].arguments[0].schema.enum.forEach((enumElement) => {
@@ -179,8 +179,8 @@ class Smartthings extends utils.Adapter {
                           });
                         }
                       }
-                      await this.setObjectNotExistsAsync(device.deviceId + ".capabilities." + letsubIdName, {
-                        type: "state",
+                      await this.setObjectNotExistsAsync(device.deviceId + '.capabilities.' + letsubIdName, {
+                        type: 'state',
                         common: common,
                         native: {},
                       });
@@ -193,7 +193,7 @@ class Smartthings extends utils.Adapter {
                 });
             });
           }
-          await this.json2iob.parse(device.deviceId + ".general", device);
+          await this.json2iob.parse(device.deviceId + '.general', device);
         }
       })
       .catch((error) => {
@@ -205,27 +205,27 @@ class Smartthings extends utils.Adapter {
   async updateDevices(onlyVirtualSwitch) {
     const statusArray = [
       {
-        path: "status",
-        url: "https://api.smartthings.com/v1/devices/$id/status",
-        desc: "Status of the device",
+        path: 'status',
+        url: 'https://api.smartthings.com/v1/devices/$id/status',
+        desc: 'Status of the device',
       },
     ];
 
     const headers = {
-      "User-Agent": "ioBroker",
-      Authorization: "Bearer " + this.config.token,
+      'User-Agent': 'ioBroker',
+      Authorization: 'Bearer ' + this.config.token,
     };
     this.deviceArray.forEach(async (device) => {
       if (onlyVirtualSwitch) {
-        if (device.type !== "Virtual Switch") {
+        if (device.type !== 'Virtual Switch') {
           return;
         }
       }
       statusArray.forEach(async (element) => {
-        const url = element.url.replace("$id", device.id);
+        const url = element.url.replace('$id', device.id);
 
         await this.requestClient({
-          method: "get",
+          method: 'get',
           url: url,
           headers: headers,
         })
@@ -246,17 +246,17 @@ class Smartthings extends utils.Adapter {
             const forceIndex = null;
             const preferedArrayName = null;
 
-            await this.json2iob.parse(device.id + "." + element.path, data, {
+            await this.json2iob.parse(device.id + '.' + element.path, data, {
               forceIndex: forceIndex,
               preferedArrayName: preferedArrayName,
               channelName: element.desc,
-              excludeStateWithEnding: this.config.exclude.replace(/ /g, "").split(","),
+              excludeStateWithEnding: this.config.exclude.replace(/ /g, '').split(','),
             });
           })
           .catch((error) => {
             if (error.response && error.response.status === 401) {
               error.response && this.log.debug(JSON.stringify(error.response.data));
-              this.log.info(element.path + " receive 401 error. Please use new Token");
+              this.log.info(element.path + ' receive 401 error. Please use new Token');
 
               return;
             }
@@ -275,7 +275,7 @@ class Smartthings extends utils.Adapter {
    */
   onUnload(callback) {
     try {
-      this.setState("info.connection", false, true);
+      this.setState('info.connection', false, true);
       clearTimeout(this.refreshTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
       clearInterval(this.updateVirtualInterval);
@@ -293,19 +293,19 @@ class Smartthings extends utils.Adapter {
   async onStateChange(id, state) {
     if (state) {
       if (!state.ack) {
-        const idArray = id.split(".");
+        const idArray = id.split('.');
         const deviceId = idArray[2];
         idArray.splice(0, 4);
-        let capadId = idArray.join(".");
-        const commandId = capadId.split("-")[1];
-        capadId = capadId.split("-")[0];
+        let capadId = idArray.join('.');
+        const commandId = capadId.split('-')[1];
+        capadId = capadId.split('-')[0];
 
         let data = { commands: [{ capability: capadId, command: commandId }] };
-        if (typeof state.val !== "boolean") {
+        if (typeof state.val !== 'boolean') {
           data.commands[0].arguments = [state.val];
         }
 
-        if (capadId === "ocf" && commandId.startsWith("postOcfCommand")) {
+        if (capadId === 'ocf' && commandId.startsWith('postOcfCommand')) {
           const commandObject = await this.getForeignObjectAsync(id).then((result) => result);
           if (commandObject) {
             const candidate = this.ocfDeviceFactory.getOcfCommandData(
@@ -323,11 +323,11 @@ class Smartthings extends utils.Adapter {
 
         this.log.info(JSON.stringify(data));
         await this.requestClient({
-          method: "post",
-          url: "https://api.smartthings.com/v1/devices/" + deviceId + "/commands",
+          method: 'post',
+          url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
           headers: {
-            "User-Agent": "ioBroker",
-            Authorization: "Bearer " + this.config.token,
+            'User-Agent': 'ioBroker',
+            Authorization: 'Bearer ' + this.config.token,
           },
           data: data,
         })
