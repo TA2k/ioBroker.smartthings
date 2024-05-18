@@ -20,7 +20,7 @@
     "@iobroker/adapter-core": "^3.1.4",
     "axios": "^1.6.8",
     "json-bigint": "^1.0.0",
-    "json2iob": "^2.6.11"
+    "json2iob": "^2.6.12"
   },
   "devDependencies": {
     "@alcalzone/release-script": "^3.7.0",
