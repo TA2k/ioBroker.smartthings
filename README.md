@@ -28,7 +28,7 @@ Tap the \"Generate Token\" button when you are done and you will be returned to 
 
 smartthings.0.id.capabilities either set to true or set a predefined value
 
-## Diskussion und Fragen:
+## Discussion and Questions:
 
 https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
 
