@@ -20,7 +20,7 @@ Adapter for Samsung Smartthings
 
 Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einrichten.
 
-1. Voraussetzungen um Apps bei SmartThings.com einzurichten:
+###1. Voraussetzungen um Apps bei SmartThings.com einzurichten:
 
 	Das geht am einfachsten, wenn man auf dem lokalen Rechner die SmartThings CLI installiert.
 	
@@ -30,7 +30,7 @@ Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einr
 	
 	Je nach Betriebssystem entsprechend installieren.
 	
-2. App anlegen:
+###2. App anlegen:
 	
 	In der Konsole smartthing apps:create ausführen
 	
@@ -84,7 +84,7 @@ Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einr
 	Kopieren Sie das neu generierten Werte und bewahren Sie es an einem sicheren Ort auf. Dies ist Ihre einzige Möglichkeit, den neu generierten Werte abzurufen.
 	Notfalls lassen sie sich aber per SmartThings CLI ändern.
 	
-3. Admin UI Smartthings-Adapter:
+###3. Admin UI Smartthings-Adapter:
 	
 	OAuth Client Id und OAuth Client eingeben
 	
