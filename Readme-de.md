@@ -22,45 +22,48 @@ Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einr
 
 ### 1. Voraussetzungen um Apps bei SmartThings.com einzurichten:
 
-	Das geht am einfachsten, wenn man auf dem lokalen Rechner die SmartThings CLI installiert.
+Das geht am einfachsten, wenn man auf dem lokalen Rechner die SmartThings CLI installiert.
 	
-	Die findet man hier: https://github.com/SmartThingsCommunity/smartthings-cli/releases
+Die findet man hier: https://github.com/SmartThingsCommunity/smartthings-cli/releases
 	
-	Anleitung dazu hier: https://developer.smartthings.com/docs/sdks/cli/introduction
+Anleitung dazu hier: https://developer.smartthings.com/docs/sdks/cli/introduction
 	
-	Je nach Betriebssystem entsprechend installieren.
+Je nach Betriebssystem entsprechend installieren.
 	
 ### 2. App anlegen:
 	
-	In der Konsole smartthing apps:create ausführen
+In der Konsole smartthing apps:create ausführen
 	
-	Anmeldeprozess im Browser durchlaufen (ich hab das mit Windows gemacht, kann also bei anderen Betriebssystemen abweichen)
+Anmeldeprozess im Browser durchlaufen (ich hab das mit Windows gemacht, kann also bei anderen Betriebssystemen abweichen)
 	
-	OAuth-In App auswählen (derzeit einzige Option)
+OAuth-In App auswählen (derzeit einzige Option)
 	
-	Display Name eingeben -> z.B iobroker
+Display Name eingeben -> z.B iobroker
 	
-	Description eingeben -> z.B. App für iobroker
+Description eingeben -> z.B. App für iobroker
 	
-	Icon Image URL (optional) -> Link zu einem Icon
+Icon Image URL (optional) -> Link zu einem Icon
 	
-	Target URL (optional) -> Enter klicken (derzeit nicht getestet)
+Target URL (optional) -> Enter klicken (derzeit nicht getestet)
 	
-	Select Scopes -> Devices r, w, x auswählen (Rest derzeit nicht getestet)
+Select Scopes -> Devices r, w, x auswählen (Rest derzeit nicht getestet)
 	
-	Add Redirect URI -> hier muss ein Link eingegeben werden, der eine Redirect Uri anzeigen kann.
-	Getestet sind:
-    https://httpbin.org/get
-	https://echo.free.beeceptor.com/sample-request
+Add Redirect URI -> hier muss ein Link eingegeben werden, der eine Redirect Uri anzeigen kann.
+
+Getestet sind:
+
+https://httpbin.org/get
+
+https://echo.free.beeceptor.com/sample-request
 						
-	Man kann auch eigene Server nutzen. Erreichbarkeit über https im Internet muss gegeben sein. Lokale Adressen funktionieren nicht (das ist nur für die Authentisierung wichtig).
-	Es können auch mehrere URL´s hinterlegt werden.
+Man kann auch eigene Server nutzen. Erreichbarkeit über https im Internet muss gegeben sein. Lokale Adressen funktionieren nicht (das ist nur für die Authentisierung wichtig).
+Es können auch mehrere URL´s hinterlegt werden.
 		
-	Finish editing Redirect URIs -> klicken
+Finish editing Redirect URIs -> klicken
 	
-	Finish and create OAuth-In SmartApp -> klicken
+Finish and create OAuth-In SmartApp -> klicken
 	
-	Dann wird eine Bestätigung angezeigt:
+Dann wird eine Bestätigung angezeigt:
 	
     Basic App Data:
 	────────────────────────────────────────────────────────────────
@@ -80,25 +83,26 @@ Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einr
 	OAuth Client Secret  xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 	───────────────────────────────────────────────────────────
 
-	OAuth Client Id und OAuth Client Secret sichern. 
-	Kopieren Sie das neu generierten Werte und bewahren Sie es an einem sicheren Ort auf. Dies ist Ihre einzige Möglichkeit, den neu generierten Werte abzurufen.
-	Notfalls lassen sie sich aber per SmartThings CLI ändern.
+OAuth Client Id und OAuth Client Secret sichern. 
+Kopieren Sie das neu generierten Werte und bewahren Sie es an einem sicheren Ort auf. Dies ist Ihre einzige Möglichkeit, den neu generierten Werte abzurufen.
+
+Notfalls lassen sie sich aber per SmartThings CLI ändern.
 	
 ### 3. Admin UI Smartthings-Adapter:
 	
-	OAuth Client Id und OAuth Client eingeben
+OAuth Client Id und OAuth Client eingeben
 	
-	Link "Get oAuth-Code" ausführen (öffnet sich in neuen Browser Tab/Fenster)
+Link "Get oAuth-Code" ausführen (öffnet sich in neuen Browser Tab/Fenster)
 	
-	SmartThings Anmeldeprozess durchführen
+SmartThings Anmeldeprozess durchführen
 	
-	Location auswählen und Authorisieren
+Location auswählen und Authorisieren
 	
-	In der Weiterleitung wird ein JSON angezeigt.
+In der Weiterleitung wird ein JSON angezeigt.
 	
-	Dort benötigen wir den unten angezeigten code. Diesen in der Admin Ui des Adapters unter Basic Access Code eintragen
+Dort benötigen wir den unten angezeigten code. Diesen in der Admin Ui des Adapters unter Basic Access Code eintragen
 	
-	Sichern und ggf. Adapter starten.
+Sichern und ggf. Adapter starten.
 	
 	
 Der Adapter aktualisiert den Access-Token nun nach 23 Stunden selbstständig.
@@ -106,6 +110,7 @@ Der Adapter aktualisiert den Access-Token nun nach 23 Stunden selbstständig.
 Der geladene Refresh-Token ist 30 Tage gültig.
 
 Sollte dieser abgelaufen sein,ist eine Neu-Authorisieren über den Link "Get oAuth-Code" in der Admin Ui des Adapters nötig.
+
 
 ## Steuern
 
