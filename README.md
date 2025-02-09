@@ -20,7 +20,7 @@ Adapter for Samsung Smartthings
 
 To use this appdater you must first set up an app at SmartThings.com.
 
-###1. Requirements to set up apps at SmartThings.com:
+### 1. Requirements to set up apps at SmartThings.com:
 
 	The easiest way to do this is to install the SmartThings CLI on the local computer.
 	
@@ -30,7 +30,7 @@ To use this appdater you must first set up an app at SmartThings.com.
 	
 	Install accordingly depending on your operating system.
 	
-###2. Create app:
+### 2. Create app:
 	Run smartthing apps:create in the console
 	
 	Go through the login process in the browser (I did this with Windows, so it may differ for other operating systems)
@@ -82,7 +82,7 @@ To use this appdater you must first set up an app at SmartThings.com.
 	Copy the newly generated values and store them in a safe place. This is your only way to retrieve the newly generated values.
 	If necessary, they can be changed using SmartThings CLI.
 	
-###3. Admin UI Smartthings adapter:
+### 3. Admin UI Smartthings adapter:
 	
 	Enter OAuth Client Id and OAuth Client
 	
