@@ -49,11 +49,12 @@ Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einr
 	Select Scopes -> Devices r, w, x auswählen (Rest derzeit nicht getestet)
 	
 	Add Redirect URI -> hier muss ein Link eingegeben werden, der eine Redirect Uri anzeigen kann.
-		Getestet sind: 	https://httpbin.org/get
-						https://echo.free.beeceptor.com/sample-request
+	Getestet sind:
+    https://httpbin.org/get
+	https://echo.free.beeceptor.com/sample-request
 						
-		Man kann auch eigene Server nutzen. Erreichbarkeit über https im Internet muss gegeben sein. Lokale Adressen funktionieren nicht (das ist nur für die Authentisierung wichtig).
-		Es können auch mehrere URL´s hinterlegt werden.
+	Man kann auch eigene Server nutzen. Erreichbarkeit über https im Internet muss gegeben sein. Lokale Adressen funktionieren nicht (das ist nur für die Authentisierung wichtig).
+	Es können auch mehrere URL´s hinterlegt werden.
 		
 	Finish editing Redirect URIs -> klicken
 	
@@ -61,22 +62,22 @@ Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einr
 	
 	Dann wird eine Bestätigung angezeigt:
 	
-	Basic App Data:
+    Basic App Data:
 	────────────────────────────────────────────────────────────────
-	 Display Name     iobroker
-	 App Id           6db1bd86-4xxx-xxxx-xxxx-xxxxxxxxxxxx
-	 App Name         iobroker-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-	 Description      App for iobroker
-	 Single Instance  true
-	 Classifications  CONNECTED_SERVICE
-	 App Type         API_ONLY
+	Display Name     iobroker
+	App Id           6db1bd86-4xxx-xxxx-xxxx-xxxxxxxxxxxx
+	App Name         iobroker-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	Description      App for iobroker
+	Single Instance  true
+	Classifications  CONNECTED_SERVICE
+	App Type         API_ONLY
 	────────────────────────────────────────────────────────────────
 
 
 	OAuth Info (you will not be able to see the OAuth info again so please save it now!):
 	───────────────────────────────────────────────────────────
-	 OAuth Client Id      xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-	 OAuth Client Secret  xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	OAuth Client Id      xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	OAuth Client Secret  xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 	───────────────────────────────────────────────────────────
 
 	OAuth Client Id und OAuth Client Secret sichern. 
