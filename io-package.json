@@ -93,10 +93,16 @@
       }
     ]
   },
-  "encryptedNative": ["token"],
-  "protectedNative": ["token"],
-  "native": {
-    "token": "",
+  "encryptedNative": ["client_secret"],
+  "protectedNative": ["client_secret"],
+  "native": { 
+    "client_id": "",
+    "client_secret": "",
+    "redirect_uri": "https://httpbin.org/get",
+    "access_code": "",
+    "interval_access_token": "23",
+    "interval_refresh_token": "30",
+    "timestamp_token": "",
     "interval": 10,
     "virtualInterval": 0,
     "exclude": "Cycle, viewInside",
@@ -122,6 +128,79 @@
         "read": true,
         "write": false,
         "def": false
+      },
+      "native": {}
+    },
+    {
+      "_id": "access_data",
+      "type": "channel",
+      "common": {
+        "name": "Access Data"
+      },
+      "native": {}
+    },
+    {
+      "_id": "access_data.access_code",
+      "type": "state",
+      "common": {
+        "role": "indicator.state",
+        "name": "Access Code",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "access_data.access_token",
+      "type": "state",
+      "common": {
+        "role": "indicator.state",
+        "name": "Access Token",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "access_data.refresh_token",
+      "type": "state",
+      "common": {
+        "role": "indicator.state",
+        "name": "Refresh Token",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "access_data.timestamp_token",
+      "type": "state",
+      "common": {
+        "role": "indicator.state",
+        "name": "Timestamp",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "access_data.token_valid_until",
+      "type": "state",
+      "common": {
+        "role": "indicator.state",
+        "name": "Token valid until",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
       },
       "native": {}
     }

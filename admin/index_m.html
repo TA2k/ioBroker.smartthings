@@ -55,6 +55,10 @@
         });
         callback(obj);
       }
+      function gotoSmartthingsAuth() {
+        console.log(client_id.value)
+        window.open('https://api.smartthings.com/oauth/authorize?client_id=' + client_id.value + '&response_type=code&redirect_uri=' + redirect_uri.value + '&scope=r:devices:*+w:devices:*+x:devices:*');
+      }
     </script>
   </head>
 
@@ -72,36 +76,51 @@
       <div class="row">
         <div class="col s12 input-field">
           <div class="col s12 translate">
-            <a href="https://account.smartthings.com/tokens" target="_blank">https://account.smartthings.com/tokens</a>
+            Please note the instructions for this adapter in the Readme.md.
           </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
+          <input type="text" class="value" id="client_id" />
+          <label for="client_id" class="translate">Client ID</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
+          <input type="text" class="value" id="client_secret" />
+          <label for="client_secret" class="translate">Client Secret</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
+          <input type="text" class="value" id="redirect_uri" />
+          <label for="redirect_uri" class="translate">Redirect Uri</label>
+        </div>
+      </div>
+     <div class="row">
+        <div class="col s12 input-field">
+          <div class="col s12 translate">
+            <a href="javascript:void(0)" onclick="gotoSmartthingsAuth()" target="_blank">Get oAuth-Code</a>
+           </div>
           <br />
           <p></p>
           <div class="col s12 translate">
-            Visit the Link. Sign in with your Samsung account to be taken to the "Personal Access Tokens" page.
+            Visit the Link. Sign in with your Samsung account to be taken to the "Access Code" page.
           </div>
-          <div class="col s12 translate">Tap the “Generate new token” button, taking you to a “New Access Token” page.</div>
-          <div class="col s12 translate">
-            Provide a name for the new token. Select any functionality you wish to authorize for the token in the “Authorized Scopes”
-            section.
-          </div>
-          <div class="col s12 translate">
-            Tap the “Generate Token” button when ready, and you’ll return to the “Personal access tokens” page.
-          </div>
-          <div class="col s12 translate">Copy the newly generated token and insert in the settings.</div>
+          <div class="col s12 translate">Copy the newly generated "Access Code" and insert in the settings in filed "Basic Access Code".</div>
         </div>
       </div>
       <div class="row">
         <div class="col s12 input-field">
-          <input type="text" class="value" id="token" />
-          <label for="token" class="translate">Smarthings Token</label>
+          <input type="text" class="value" id="access_code" />
+          <label for="access_code" class="translate">Smarthings Basic Access Code</label>
         </div>
       </div>
-
       <div class="row">
         <div class="col s12 input-field">
-          <div class="translate">350 request per 60 seconds allowed. Each device is 1 request per interval.</div>
-          <input type="number" class="value" id="interval" />
-          <label for="interval" class="translate">Update interval (in seconds)</label>
+          <input type="number" class="value" id="interval_access_token" />
+          <label for="interval" class="translate">Update interval access token (in hours)</label>
         </div>
       </div>
       <div class="row">
