@@ -100,6 +100,7 @@
     "client_secret": "",
     "redirect_uri": "https://httpbin.org/get",
     "access_code": "",
+    "scope": "r:devices:*+w:devices:*+x:devices:*",
     "interval_access_token": "23",
     "interval_refresh_token": "30",
     "timestamp_token": "",

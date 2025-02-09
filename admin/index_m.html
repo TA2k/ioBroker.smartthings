@@ -57,7 +57,7 @@
       }
       function gotoSmartthingsAuth() {
         console.log(client_id.value)
-        window.open('https://api.smartthings.com/oauth/authorize?client_id=' + client_id.value + '&response_type=code&redirect_uri=' + redirect_uri.value + '&scope=r:devices:*+w:devices:*+x:devices:*');
+        window.open('https://api.smartthings.com/oauth/authorize?client_id=' + client_id.value + '&response_type=code&redirect_uri=' + redirect_uri.value + '&scope=' + scope.value);
       }
     </script>
   </head>
@@ -115,6 +115,12 @@
         <div class="col s12 input-field">
           <input type="text" class="value" id="access_code" />
           <label for="access_code" class="translate">Smarthings Basic Access Code</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
+          <input type="text" class="value" id="scope" />
+          <label for="scope" class="translate">Permission-Data</label>
         </div>
       </div>
       <div class="row">

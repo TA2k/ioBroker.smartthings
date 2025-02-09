@@ -51,6 +51,18 @@ systemDictionary = {
     'pl': 'Skopiuj nowo wygenerowany „Kod dostępu” i wprowadź go w ustawieniach w polu „Podstawowy kod dostępu”.',
     'zh-cn': '复制新生成的“访问代码”并将其插入“基本访问代码”字段的设置中。'
   },
+  'Permission-Data': {
+    'en': 'Permission-Data',
+    'de': 'Berechtigungsdaten',
+    'ru': 'Разрешение-Данные',
+    'pt': 'Permissão-Dados',
+    'nl': 'Toestemming-Data',
+    'fr': "Données d'autorisation",
+    'it': 'Autorizzazione-Dati',
+    'es': 'Datos de permiso',
+    'pl': 'Dane uprawnień',
+    'zh-cn': '许可数据'
+  },
   'Update interval in minutes': {
     en: 'Update interval in minutes',
     de: 'Aktualisierungsintervall in Minuten',
