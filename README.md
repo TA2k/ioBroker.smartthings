@@ -98,7 +98,15 @@ Select location and authorize
 	
 A JSON is displayed in the redirect.
 	
-There we need the code shown below. Enter this in the adapter's Admin Ui under Basic Access Code
+There we need the code shown below.
+
+	....
+	  }, 
+	  "origin": "89.xxx.xx.xx", 
+	  "url": "https://httpbin.org/get?code=XxXxxXx"
+	}
+ 
+We need "XxXxxXx". Enter this in the adapter's Admin Ui under Basic Access Code
 	
 Save and, if necessary, start the adapter.
 	

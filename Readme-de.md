@@ -99,8 +99,14 @@ SmartThings Anmeldeprozess durchführen
 Location auswählen und Authorisieren
 	
 In der Weiterleitung wird ein JSON angezeigt.
-	
-Dort benötigen wir den unten angezeigten code. Diesen in der Admin Ui des Adapters unter Basic Access Code eintragen
+
+	....
+	  }, 
+	  "origin": "89.xxx.xx.xx", 
+	  "url": "https://httpbin.org/get?code=XxXxxXx"
+	}
+ 	
+Dort benötigen wir den unten angezeigten code "XxXxxXx". Diesen in der Admin Ui des Adapters unter Basic Access Code eintragen
 	
 Sichern und ggf. Adapter starten.
 	
