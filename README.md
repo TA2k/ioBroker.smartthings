@@ -18,11 +18,105 @@ Adapter for Samsung Smartthings
 
 ## Login process:
 
-Visit the link. https://account.smartthings.com/tokens
-Log in with your Samsung account to go to the \"Personal Access Tokens\" page.
-Tap the \"Generate New Token\" button to go to the \"New Access Token\" page.
-Provide a name for the new token. In the \"Authorized Scopes\" section, select any functionality you want to authorize for the token.
-Tap the \"Generate Token\" button when you are done and you will be returned to the \"Personal Access Tokens\" page. Copy the newly generated token and keep it in a safe place. This is your only way to retrieve the newly generated token value.
+To use this appdater you must first set up an app at SmartThings.com.
+
+### 1. Requirements to set up apps at SmartThings.com:
+The easiest way to do this is to install the SmartThings CLI on the local computer.
+	
+You can find it here: https://github.com/SmartThingsCommunity/smartthings-cli/releases
+	
+Instructions here: https://developer.smartthings.com/docs/sdks/cli/introduction
+	
+Install accordingly depending on your operating system.
+	
+### 2. Create app:
+Run smartthing apps:create in the console
+	
+Go through the login process in the browser (I did this with Windows, so it may differ for other operating systems)
+	
+Select OAuth-In app (currently only option)
+	
+Enter display name -> e.g. B iobroker
+	
+Enter description -> e.g. app for iobroker
+	
+Icon Image URL (optional) -> Link to an icon
+	
+Target URL (optional) -> click Enter (currently not tested)
+	
+Select Scopes -> Select Devices r, w, x (rest currently not tested)
+	
+Add Redirect URI -> a link must be entered here that can display a redirect URI.
+
+Tested are: 
+
+https://httpbin.org/get
+
+https://echo.free.beeceptor.com/sample-request
+					
+You can also use your own servers. Accessibility via https on the Internet must be given. Local addresses don't work (this is only important for authentication).
+Multiple URLs can also be stored.
+		
+Finish editing Redirect URIs -> click
+	
+Finish and create OAuth-In SmartApp -> click
+	
+Then a confirmation will be displayed:
+	
+	Basic App Data:
+	────────────────────────────────────────────────────────────────
+	Display Name     iobroker
+	App Id           6db1bd86-4xxx-xxxx-xxxx-xxxxxxxxxxxx
+	App Name         iobroker-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	Description      App for iobroker
+	Single Instance  true
+	Classifications  CONNECTED_SERVICE
+	App Type         API_ONLY
+	────────────────────────────────────────────────────────────────
+
+
+	OAuth Info (you will not be able to see the OAuth info again so please save it now!):
+	───────────────────────────────────────────────────────────
+	OAuth Client Id      xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	OAuth Client Secret  xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	───────────────────────────────────────────────────────────
+
+Secure OAuth Client Id and OAuth Client Secret. 
+Copy the newly generated values and store them in a safe place. This is your only way to retrieve the newly generated values.
+
+If necessary, they can be changed using SmartThings CLI.
+	
+### 3. Admin UI Smartthings adapter:
+	
+Enter OAuth Client Id and OAuth Client
+	
+Execute link "Get oAuth-Code" (opens in new browser tab/window)
+	
+Complete the SmartThings registration process
+	
+Select location and authorize
+	
+A JSON is displayed in the redirect.
+	
+There we need the code shown below.
+
+	....
+	  }, 
+	  "origin": "89.xxx.xx.xx", 
+	  "url": "https://httpbin.org/get?code=XxXxxXx"
+	}
+ 
+We need "XxXxxXx". Enter this in the adapter's Admin Ui under Basic Access Code
+	
+Save and, if necessary, start the adapter.
+	
+	
+The adapter now updates the access token automatically after 23 hours.
+
+The loaded refresh token is valid for 30 days.
+
+If this has expired, you will need to re-authorize using the “Get oAuth Code” link in the adapter’s admin interface.
+
 
 ## Steer
 

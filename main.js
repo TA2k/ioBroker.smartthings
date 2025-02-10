@@ -10,6 +10,7 @@ const utils = require('@iobroker/adapter-core');
 const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
+const moment = require('moment');
 
 class Smartthings extends utils.Adapter {
   /**
@@ -30,6 +31,7 @@ class Smartthings extends utils.Adapter {
     this.deviceArray = [];
     this.session = {};
     this.ocfDeviceFactory = new OcfDeviceFactory();
+    this.access_token = '';
   }
 
   /**
@@ -44,10 +46,24 @@ class Smartthings extends utils.Adapter {
     }
 
     this.subscribeStates('*');
-    if (this.config.token) {
+
+    const access_code = await this.getStateAsync('access_data.access_code');
+    if (access_code && access_code.val !== this.config.access_code) {
+      await this.refreshAccessToken(0);
+    }
+    // Token aktualisieren
+    await this.checkAccessToken();
+
+    const state = await this.getStateAsync('access_data.access_token');
+    if (state){
+      this.access_token = String(state.val);
+    }
+
+    if (this.access_token) {
       await this.getDeviceList();
       await this.updateDevices();
       this.updateInterval = setInterval(async () => {
+        await this.checkAccessToken();
         await this.updateDevices();
       }, this.config.interval * 1000);
       if (this.config.virtualInterval > 0) {
@@ -56,7 +72,62 @@ class Smartthings extends utils.Adapter {
         }, this.config.virtualInterval * 1000);
       }
     } else {
-      this.log.info('Please enter a Samsung Smartthings Token');
+      this.log.info('Please enter a Samsung Smartthings Access Code');
+    }
+  }
+
+  async checkAccessToken(){
+    const states = await this.getStatesAsync('access_data.*');
+    if (states){
+      if(moment(new Date(String(states[`${this.namespace}.access_data.timestamp_token`].val))).add(this.config.interval_refresh_token, 'days').valueOf() <= moment().valueOf()){
+        this.log.info('Please enter a Samsung Smartthings Access Code');
+        this.setForeignState('system.adapter.' + this.namespace + '.alive', false);
+      }
+      if(moment(new Date(String(states[`${this.namespace}.access_data.token_valid_until`].val))).valueOf() <= moment().valueOf()){
+        await this.refreshAccessToken(1, String(states[`${this.namespace}.access_data.refresh_token`].val));
+      }
+    }
+  }
+
+  async refreshAccessToken(type, refresh_token = '') {
+    let params = '';
+    try {
+      if (type === 0){
+        console.log('CHECK');
+        params = 'grant_type=authorization_code&client_id=' + this.config.client_id.trim() + '&code=' + this.config.access_code.trim() + '&redirect_uri=' +this.config.redirect_uri.trim();
+      }else{
+        console.log('UPDATE TOKEN');
+        params = 'grant_type=refresh_token&client_id=' + this.config.client_id.trim() + '&refresh_token=' + refresh_token.trim();
+      }
+      await this.requestClient.post(
+        'https://api.smartthings.com/oauth/token',
+        params,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          auth: {
+            username: this.config.client_id.trim(),
+            password: this.config.client_secret.trim()
+          }
+        }
+      )
+        .then(async (res) => {
+          this.log.debug(JSON.stringify(res.data));
+          this.access_token = res.data.access_token;
+          this.setStateAsync('access_data.access_code', { val: this.config.access_code, ack: true });
+          this.setStateAsync('access_data.access_token', { val: this.access_token, ack: true });
+          this.setStateAsync('access_data.refresh_token', { val: res.data.refresh_token, ack: true });
+          this.setStateAsync('access_data.timestamp_token', { val: moment().toJSON(), ack: true });
+          this.setStateAsync('access_data.token_valid_until', { val: moment().add(this.config.interval_access_token, 'hours').toJSON(), ack: true });
+          this.log.info('Access token has been refreshed');
+          this.setState('info.connection', true, true);
+        });
+    }catch(error) {
+      console.error('Error in refreshAccessToken: ', error);
+      this.setForeignState('system.adapter.' + this.namespace + '.alive', false);
+      this.setStateAsync('info.connection', { val: false, ack: true });
+      this.log.error('Error refreshing access token: ' + error);
     }
   }
 
@@ -66,7 +137,7 @@ class Smartthings extends utils.Adapter {
       url: 'https://api.smartthings.com/v1/devices',
       headers: {
         'User-Agent': 'ioBroker',
-        Authorization: 'Bearer ' + this.config.token,
+        Authorization: 'Bearer ' + this.access_token,
       },
     })
       .then(async (res) => {
@@ -111,7 +182,7 @@ class Smartthings extends utils.Adapter {
                 url: 'https://api.smartthings.com/v1/capabilities/' + capability.id + '/' + capability.version,
                 headers: {
                   'User-Agent': 'ioBroker',
-                  Authorization: 'Bearer ' + this.config.token,
+                  Authorization: 'Bearer ' + this.access_token,
                 },
               })
                 .then(async (res) => {
@@ -158,7 +229,7 @@ class Smartthings extends utils.Adapter {
                           };
                           await this.setObjectNotExistsAsync(
                             device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName,
-                            objectRaw,
+                            Object(objectRaw),
                           );
                         }
                         commandCreated = true;
@@ -179,11 +250,15 @@ class Smartthings extends utils.Adapter {
                           });
                         }
                       }
-                      await this.setObjectNotExistsAsync(device.deviceId + '.capabilities.' + letsubIdName, {
+                      const objectRaw = {
                         type: 'state',
                         common: common,
                         native: {},
-                      });
+                      };
+                      await this.setObjectNotExistsAsync(
+                        device.deviceId + '.capabilities.' + letsubIdName,
+                        Object(objectRaw)
+                      );
                     }
                   });
                 })
@@ -213,7 +288,7 @@ class Smartthings extends utils.Adapter {
 
     const headers = {
       'User-Agent': 'ioBroker',
-      Authorization: 'Bearer ' + this.config.token,
+      Authorization: 'Bearer ' + this.access_token,
     };
     this.deviceArray.forEach(async (device) => {
       if (onlyVirtualSwitch) {
@@ -327,7 +402,7 @@ class Smartthings extends utils.Adapter {
           url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
           headers: {
             'User-Agent': 'ioBroker',
-            Authorization: 'Bearer ' + this.config.token,
+            Authorization: 'Bearer ' + this.access_token,
           },
           data: data,
         })

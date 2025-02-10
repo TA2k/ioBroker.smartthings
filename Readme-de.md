@@ -18,11 +18,105 @@ Adapter for Samsung Smartthings
 
 ## Loginablauf:
 
-Besuchen Sie den Link. https://account.smartthings.com/tokens  
-Melden Sie sich mit Ihrem Samsung-Konto an, um zur Seite \"Persönliche Zugriffstoken\" zu gelangen.  
-Tippen Sie auf die Schaltfläche „Neuen Token generieren“, um auf die Seite „Neuer Zugriffstoken“ zu gelangen.  
-Geben Sie einen Namen für das neue Token an. Wählen Sie im Abschnitt „Autorisierte Bereiche“ eine beliebige Funktionalität aus, die Sie für das Token autorisieren möchten.  
-Tippen Sie auf die Schaltfläche \"Token generieren\", wenn Sie fertig sind, und Sie kehren zur Seite \"Persönliche Zugriffstoken\" zurück. Kopieren Sie das neu generierte Token und bewahren Sie es an einem sicheren Ort auf. Dies ist Ihre einzige Möglichkeit, den neu generierten Tokenwert abzurufen.
+Um diesen Apdater zu nutzen muss man zunächst bei SmartThings.com eine App einrichten.
+
+### 1. Voraussetzungen um Apps bei SmartThings.com einzurichten:
+
+Das geht am einfachsten, wenn man auf dem lokalen Rechner die SmartThings CLI installiert.
+	
+Die findet man hier: https://github.com/SmartThingsCommunity/smartthings-cli/releases
+	
+Anleitung dazu hier: https://developer.smartthings.com/docs/sdks/cli/introduction
+	
+Je nach Betriebssystem entsprechend installieren.
+	
+### 2. App anlegen:
+	
+In der Konsole smartthing apps:create ausführen
+	
+Anmeldeprozess im Browser durchlaufen (ich hab das mit Windows gemacht, kann also bei anderen Betriebssystemen abweichen)
+	
+OAuth-In App auswählen (derzeit einzige Option)
+	
+Display Name eingeben -> z.B iobroker
+	
+Description eingeben -> z.B. App für iobroker
+	
+Icon Image URL (optional) -> Link zu einem Icon
+	
+Target URL (optional) -> Enter klicken (derzeit nicht getestet)
+	
+Select Scopes -> Devices r, w, x auswählen (Rest derzeit nicht getestet)
+	
+Add Redirect URI -> hier muss ein Link eingegeben werden, der eine Redirect Uri anzeigen kann.
+
+Getestet sind:
+
+https://httpbin.org/get
+
+https://echo.free.beeceptor.com/sample-request
+						
+Man kann auch eigene Server nutzen. Erreichbarkeit über https im Internet muss gegeben sein. Lokale Adressen funktionieren nicht (das ist nur für die Authentisierung wichtig).
+Es können auch mehrere URL´s hinterlegt werden.
+		
+Finish editing Redirect URIs -> klicken
+	
+Finish and create OAuth-In SmartApp -> klicken
+	
+Dann wird eine Bestätigung angezeigt:
+	
+    Basic App Data:
+	────────────────────────────────────────────────────────────────
+	Display Name     iobroker
+	App Id           6db1bd86-4xxx-xxxx-xxxx-xxxxxxxxxxxx
+	App Name         iobroker-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	Description      App for iobroker
+	Single Instance  true
+	Classifications  CONNECTED_SERVICE
+	App Type         API_ONLY
+	────────────────────────────────────────────────────────────────
+
+
+	OAuth Info (you will not be able to see the OAuth info again so please save it now!):
+	───────────────────────────────────────────────────────────
+	OAuth Client Id      xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	OAuth Client Secret  xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	───────────────────────────────────────────────────────────
+
+OAuth Client Id und OAuth Client Secret sichern. 
+Kopieren Sie das neu generierten Werte und bewahren Sie es an einem sicheren Ort auf. Dies ist Ihre einzige Möglichkeit, den neu generierten Werte abzurufen.
+
+Notfalls lassen sie sich aber per SmartThings CLI ändern.
+	
+### 3. Admin UI Smartthings-Adapter:
+	
+OAuth Client Id und OAuth Client eingeben
+	
+Link "Get oAuth-Code" ausführen (öffnet sich in neuen Browser Tab/Fenster)
+	
+SmartThings Anmeldeprozess durchführen
+	
+Location auswählen und Authorisieren
+	
+In der Weiterleitung wird ein JSON angezeigt.
+
+	....
+	  }, 
+	  "origin": "89.xxx.xx.xx", 
+	  "url": "https://httpbin.org/get?code=XxXxxXx"
+	}
+ 	
+Dort benötigen wir den unten angezeigten code "XxXxxXx". Diesen in der Admin Ui des Adapters unter Basic Access Code eintragen
+	
+Sichern und ggf. Adapter starten.
+	
+	
+Der Adapter aktualisiert den Access-Token nun nach 23 Stunden selbstständig.
+
+Der geladene Refresh-Token ist 30 Tage gültig.
+
+Sollte dieser abgelaufen sein,ist eine Neu-Authorisieren über den Link "Get oAuth-Code" in der Admin Ui des Adapters nötig.
+
 
 ## Steuern
 
