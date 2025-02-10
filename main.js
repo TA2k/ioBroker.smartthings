@@ -84,7 +84,7 @@ class Smartthings extends utils.Adapter {
         this.setForeignState('system.adapter.' + this.namespace + '.alive', false);
       }
       if(moment(new Date(String(states[`${this.namespace}.access_data.token_valid_until`].val))).valueOf() <= moment().valueOf()){
-        this.refreshAccessToken(1, String(states[`${this.namespace}.access_data.refresh_token`].val));
+        await this.refreshAccessToken(1, String(states[`${this.namespace}.access_data.refresh_token`].val));
       }
     }
   }
@@ -118,8 +118,6 @@ class Smartthings extends utils.Adapter {
           this.setStateAsync('access_data.access_code', { val: this.config.access_code, ack: true });
           this.setStateAsync('access_data.access_token', { val: this.access_token, ack: true });
           this.setStateAsync('access_data.refresh_token', { val: res.data.refresh_token, ack: true });
-          // this.setStateAsync('access_data.timestamp_token', { val: Math.floor(Date.now() / 1000), ack: true });
-          // this.setStateAsync('access_data.token_valid_until', { val: Math.floor(Date.now() / 1000 + 36006), ack: true }); //86340 23:59
           this.setStateAsync('access_data.timestamp_token', { val: moment().toJSON(), ack: true });
           this.setStateAsync('access_data.token_valid_until', { val: moment().add(this.config.interval_access_token, 'hours').toJSON(), ack: true });
           this.log.info('Access token has been refreshed');
