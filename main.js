@@ -32,6 +32,7 @@ class Smartthings extends utils.Adapter {
     this.deviceArray = [];
     this.session = {};
     this.ocfDeviceFactory = new OcfDeviceFactory();
+    this.session = {};
   }
 
   /**
@@ -44,14 +45,21 @@ class Smartthings extends utils.Adapter {
       this.log.info('Set interval to minimum 1');
       this.config.interval = 1;
     }
-
+    th;
     this.subscribeStates('*');
-    if (!this.config.username || !this.config.password || !this.config.token) {
-      this.log.info('Please enter a Samsung Smartthings Username, Password  in the instance settings');
+    if (!this.config.username || !this.config.token) {
+      this.log.info('Please enter a Samsung Smartthings Username and code url  in the instance settings');
       return;
     }
     if (this.config.username) {
-      await this.login();
+      const authState = await this.getStateAsync('authInformation.session');
+      if (authState && authState.val) {
+        this.session = JSON.parse(authState.val);
+        this.log.info('Use existing session to login');
+        await this.refreshToken();
+      } else {
+        await this.login();
+      }
     }
     if (this.config.token) {
       await this.getDeviceList();
@@ -64,12 +72,17 @@ class Smartthings extends utils.Adapter {
           await this.updateDevices(true);
         }, this.config.virtualInterval * 1000);
       }
+      this.session.expires_in = this.session.expires_in || 86400;
+      this.refreshInterval = this.setInterval(async () => {
+        await refreshToken();
+      }, this.session.expires_in * 1000);
     } else {
       this.log.info('Please enter a Samsung Smartthings Token');
     }
   }
 
   async login() {
+    this.log.debug('Start login via code url');
     //eslint-disable-next-line
     const initialPayload = {
       state:
@@ -111,7 +124,7 @@ class Smartthings extends utils.Adapter {
       Buffer.from(this.subKey, 'base64').subarray(0, 16),
       Buffer.from(this.subIv, 'base64'),
     );
-    decipher.setAutoPadding(false);
+    decipher.setAutoPadding(true);
     let decrypted = decipher.update(Buffer.from(code, 'hex'), undefined, 'utf8');
     decrypted += decipher.final('utf8');
     this.log.debug(decrypted);
@@ -158,6 +171,7 @@ class Smartthings extends utils.Adapter {
       .catch((error) => {
         this.log.error(error);
         error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error('Please use a new code url');
       });
     if (!userInfos || !userInfos.userauth_token) {
       this.log.error('No userauth_token found');
@@ -224,9 +238,28 @@ class Smartthings extends utils.Adapter {
         grant_type: 'authorization_code',
       },
     })
-      .then((res) => {
+      .then(async (res) => {
         this.log.debug(JSON.stringify(res.data));
         this.session = res.data;
+        await this.extendObject('authInformation', {
+          type: 'channel',
+          common: {
+            name: 'Auth Information',
+          },
+          native: {},
+        });
+        await this.extendObject('authInformation.session', {
+          type: 'state',
+          common: {
+            name: 'Session',
+            type: 'string',
+            role: 'state',
+            write: false,
+            read: true,
+          },
+          native: {},
+        });
+        await this.setState('authInformation.session', JSON.stringify(this.session), true);
         this.config.token = res.data.access_token;
         return res.data;
       })
@@ -235,6 +268,50 @@ class Smartthings extends utils.Adapter {
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
   }
+
+  async refreshToken() {
+    if (!this.session.refresh_token) {
+      this.log.debug('No refresh_token found');
+      return;
+    }
+    this.log.debug('Start refresh token');
+    await this.requestClient({
+      method: 'post',
+      maxBodyLength: Infinity,
+      url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
+      headers: {
+        'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-osp-clientversion': '3.6.2024042301',
+        accept: '*/*',
+        'x-osp-packageversion': '1.7.22',
+        'x-osp-packagename': 'com.samsung.oneconnect4ios',
+        'accept-language': 'de-DE,de;q=0.9',
+        'x-osp-clientmodel': 'iPhone',
+        'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
+        'x-osp-appid': '8931gfak30',
+        'x-osp-clientosversion': '15.8.3',
+      },
+      data: {
+        code: this.session.refresh_token,
+        client_id: '8931gfak30',
+        grant_type: 'refresh_token',
+      },
+    })
+      .then(async (res) => {
+        this.log.debug(JSON.stringify(res.data));
+        this.session = res.data;
+        await this.setState('authInformation.session', JSON.stringify(this.session), true);
+        this.config.token = res.data.access_token;
+        return res.data;
+      })
+      .catch((error) => {
+        this.log.error(error);
+        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error('Refresh Token failed please delete authInformation.session and enter a new code Url');
+      });
+  }
+
   async getDeviceList() {
     await this.requestClient({
       method: 'get',
