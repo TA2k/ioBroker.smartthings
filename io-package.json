@@ -93,12 +93,11 @@
       }
     ]
   },
-  "encryptedNative": ["token", "password"],
-  "protectedNative": ["token", "password"],
+  "encryptedNative": ["token"],
+  "protectedNative": ["token"],
   "native": {
     "token": "",
     "username": "",
-    "password": "",
     "codeUrl": "",
     "interval": 10,
     "virtualInterval": 0,

@@ -50,7 +50,7 @@ class Smartthings extends utils.Adapter {
       this.log.info('Please enter a Samsung Smartthings Username, Password  in the instance settings');
       return;
     }
-    if (this.config.username && this.config.password) {
+    if (this.config.username) {
       await this.login();
     }
     if (this.config.token) {
