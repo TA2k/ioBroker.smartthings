@@ -45,7 +45,7 @@ class Smartthings extends utils.Adapter {
       this.log.info('Set interval to minimum 1');
       this.config.interval = 1;
     }
-    th;
+
     this.subscribeStates('*');
     if (!this.config.username || !this.config.token) {
       this.log.info('Please enter a Samsung Smartthings Username and code url  in the instance settings');
@@ -74,7 +74,7 @@ class Smartthings extends utils.Adapter {
       }
       this.session.expires_in = this.session.expires_in || 86400;
       this.refreshInterval = this.setInterval(async () => {
-        await refreshToken();
+        await this.refreshToken();
       }, this.session.expires_in * 1000);
     } else {
       this.log.info('Please enter a Samsung Smartthings Token');
