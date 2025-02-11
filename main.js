@@ -293,7 +293,7 @@ class Smartthings extends utils.Adapter {
         'x-osp-clientosversion': '15.8.3',
       },
       data: {
-        code: this.session.refresh_token,
+        refresh_token: this.session.refresh_token,
         client_id: '8931gfak30',
         grant_type: 'refresh_token',
       },
