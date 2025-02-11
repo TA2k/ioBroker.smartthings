@@ -30,7 +30,7 @@ smartthings.0.id.capabilities either set to true or set a predefined value
 https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
 
 ## Changelog
-### 0.2.1 (2025-02-11)
+### 0.2.2 (2025-02-11)
 
 - add new login process
 

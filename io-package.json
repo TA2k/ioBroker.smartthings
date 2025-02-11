@@ -1,9 +1,9 @@
 {
   "common": {
     "name": "smartthings",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "news": {
-      "0.2.1": {
+      "0.2.2": {
         "en": "add new login process",
         "de": "neuer login-prozess hinzugefügt",
         "ru": "добавить новый процесс входа",
