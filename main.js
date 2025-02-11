@@ -47,20 +47,16 @@ class Smartthings extends utils.Adapter {
     }
 
     this.subscribeStates('*');
-    if (!this.config.username || !this.config.token) {
-      this.log.info('Please enter a Samsung Smartthings Username and code url  in the instance settings');
-      return;
+
+    const authState = await this.getStateAsync('authInformation.session');
+    if (authState && authState.val) {
+      this.session = JSON.parse(authState.val);
+      this.log.info('Use existing session to login');
+      await this.refreshToken();
+    } else {
+      await this.login();
     }
-    if (this.config.username) {
-      const authState = await this.getStateAsync('authInformation.session');
-      if (authState && authState.val) {
-        this.session = JSON.parse(authState.val);
-        this.log.info('Use existing session to login');
-        await this.refreshToken();
-      } else {
-        await this.login();
-      }
-    }
+
     if (this.config.token) {
       await this.getDeviceList();
       await this.updateDevices();

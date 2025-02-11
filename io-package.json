@@ -1,11 +1,11 @@
 {
   "common": {
     "name": "smartthings",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "news": {
-      "0.2.0": {
+      "0.2.1": {
         "en": "add new login process",
-        "de": "neuen login-prozess",
+        "de": "neuer login-prozess hinzugefügt",
         "ru": "добавить новый процесс входа",
         "pt": "adicionar novo processo de login",
         "nl": "nieuw aanmeldproces toevoegen",
@@ -79,13 +79,8 @@
       "pl": "Adapter do Samsung Smartthings",
       "zh-cn": "适用于三星 Smartthings 的适配器"
     },
-    "authors": [
-      "TA2k <tombox2020@gmail.com>"
-    ],
-    "keywords": [
-      "samsung",
-      "smartthings"
-    ],
+    "authors": ["TA2k <tombox2020@gmail.com>"],
+    "keywords": ["samsung", "smartthings"],
     "license": "MIT",
     "platform": "Javascript/Node.js",
     "main": "main.js",
@@ -111,12 +106,8 @@
       }
     ]
   },
-  "encryptedNative": [
-    "token"
-  ],
-  "protectedNative": [
-    "token"
-  ],
+  "encryptedNative": ["token"],
+  "protectedNative": ["token"],
   "native": {
     "token": "",
     "codeUrl": "",
