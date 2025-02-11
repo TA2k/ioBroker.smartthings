@@ -10,6 +10,8 @@ const utils = require('@iobroker/adapter-core');
 const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
+const crypto = require('crypto');
+const qs = require('qs');
 
 class Smartthings extends utils.Adapter {
   /**
@@ -44,6 +46,13 @@ class Smartthings extends utils.Adapter {
     }
 
     this.subscribeStates('*');
+    if (!this.config.username || !this.config.password || !this.config.token) {
+      this.log.info('Please enter a Samsung Smartthings Username, Password  in the instance settings');
+      return;
+    }
+    if (this.config.username && this.config.password) {
+      await this.login();
+    }
     if (this.config.token) {
       await this.getDeviceList();
       await this.updateDevices();
@@ -60,6 +69,172 @@ class Smartthings extends utils.Adapter {
     }
   }
 
+  async login() {
+    //eslint-disable-next-line
+    const initialPayload = {
+      state:
+        'vhSgCj2VZ6PU5L8KCkarHaUfd-cN2y1Qr31Xny3in-7Bs3gkc4gc6-n5SRxYmHkHFy-g3t3cMXb0n44663cSDW-lVYUve0KvNPAId7oNX32rHhyLUTxM153OOY3aE-XwacnslNkPUivJr-Gr3wk0qdRUlpiup-FlWL4SB7-w-IJChDHz5NcpsBjbdhS5DrGPKaOUC209ywDiHmvcxpj0IrLcQwcpTBT9-uuq0D82tBlA726OqQnv0WNMSLeQkU0ZzWlv',
+      devicePhysicalAddressText: '0E39C792-26A0-4EC0-8822-7C61A8217E99',
+      clientId: '8931gfak30',
+      prompt: 'consent',
+      deviceOSVersion: '15.8.3',
+      deviceUniqueID: '0E39C792-26A0-4EC0-8822-7C61A8217E99',
+      iosType: 'Y',
+      countryCode: 'DE',
+      scope: 'iot.client|mcs.client|members.contactus|galaxystore.openapi',
+      competitorDeviceYNFlag: 'Y',
+      deviceType: 'APP',
+      responseEncryptionYNFlag: 'Y',
+      code_challenge: '6Sgp7PQ6ioAsU0HoM6HmOH_WhijBanPciZAqPhtSMz4',
+      code_challenge_method: 'S256',
+      redirect_uri: 'SamsungConnect://samsungaccount/callback?action=authorize',
+      iosYNFlag: 'Y',
+      responseEncryptionType: '1',
+      deviceModelID: 'iPhone',
+    };
+    this.key = 'SEmgtdtU3UgsuxAPTmOZKMXGD/WhIQAAAAAAAAAAAAA=';
+    this.iv = 'eTB+SU9fLW5ZOFdiX05oSA==';
+    this.subKey = 'dmhTZ0NqMlZaNlBVNUw4S0NrYXJIYVVmZC1jTjJ5MVE=';
+    this.subIv = 'eTB+SU9fLW5ZOFdiX05oSA==';
+    this.log.debug('Initial Login');
+    if (!this.config.codeUrl) {
+      this.log.error('Please enter a Samsung Smartthings Code Url in the instance settings');
+      return;
+    }
+    const code = qs.parse(this.config.codeUrl.split('?')[1]).code;
+    if (!code) {
+      this.log.error('No Code found in the codeUrl');
+      return;
+    }
+    const decipher = crypto.createDecipheriv(
+      'aes-128-cbc',
+      Buffer.from(this.subKey, 'base64').subarray(0, 16),
+      Buffer.from(this.subIv, 'base64'),
+    );
+    decipher.setAutoPadding(false);
+    let decrypted = decipher.update(Buffer.from(code, 'hex'), undefined, 'utf8');
+    decrypted += decipher.final('utf8');
+    this.log.debug(decrypted);
+    const userInfos = await this.requestClient({
+      method: 'post',
+      maxBodyLength: Infinity,
+      url: 'https://eu-auth2.samsungosp.com/auth/oauth2/authenticate',
+      params: {
+        client_id: 'a2pvoj8e5q',
+        code: decrypted,
+        code_verifier:
+          'ZVM-W29DXe3izFprmGcq45UAzkY0UFLHl-f2CP0EFlY3CiE18V_MrKQ4d0U~7FCZZ8wLwa.adiHENmMx44QKQhy8wEkXR3BfNbDkzJ1AwdVRh72-49CYhu-B12_.8CwF',
+        grant_type: 'authorization_code',
+        physical_address_text: '0E39C792-26A0-4EC0-8822-7C61A8217E99',
+        service_type: 'M',
+        username: this.config.username,
+      },
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
+        'x-osp-clientversion': '3.6.2024042301',
+        accept: '*/*',
+        'accept-language': 'de-DE,de;q=0.9',
+        'x-osp-clientmodel': 'iPhone',
+        'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
+        'x-osp-appid': 'a2pvoj8e5q',
+        'x-osp-clientosversion': '15.8.3',
+      },
+      data: {
+        code: decrypted,
+        service_type: 'M',
+        grant_type: 'authorization_code',
+        username: this.config.username,
+        code_verifier:
+          'ZVM-W29DXe3izFprmGcq45UAzkY0UFLHl-f2CP0EFlY3CiE18V_MrKQ4d0U~7FCZZ8wLwa.adiHENmMx44QKQhy8wEkXR3BfNbDkzJ1AwdVRh72-49CYhu-B12_.8CwF',
+        client_id: 'a2pvoj8e5q',
+        physical_address_text: '0E39C792-26A0-4EC0-8822-7C61A8217E99',
+      },
+    })
+      .then((res) => {
+        this.log.debug(JSON.stringify(res.data));
+        return res.data;
+      })
+      .catch((error) => {
+        this.log.error(error);
+        error.response && this.log.error(JSON.stringify(error.response.data));
+      });
+    if (!userInfos || !userInfos.userauth_token) {
+      this.log.error('No userauth_token found');
+      return;
+    }
+    const codeInfos = await this.requestClient({
+      method: 'get',
+      maxBodyLength: Infinity,
+      url: 'https://eu-auth2.samsungosp.com/auth/oauth2/v2/authorize',
+      params: {
+        client_id: '8931gfak30',
+        code_challenge: 'ZQS43TN9nQHHKwdNw4ZLxSyUAZpKXQtXizw_BFgGZ_g',
+        code_challenge_method: 'S256',
+        physical_address_text: '0E39C792-26A0-4EC0-8822-7C61A8217E99',
+        redirect_uri: 'SamsungConnect://samsungaccount/callback',
+        response_type: 'code',
+        scope: 'iot.client mcs.client members.contactus galaxystore.openapi',
+        service_type: 'M',
+        userauth_token: userInfos.userauth_token,
+      },
+      headers: {
+        'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
+        'x-osp-clientversion': '3.6.2024042301',
+        accept: '*/*',
+        'x-osp-packageversion': '1.7.22',
+        'x-osp-packagename': 'com.samsung.oneconnect4ios',
+        'accept-language': 'de-DE,de;q=0.9',
+        'x-osp-clientmodel': 'iPhone',
+        'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
+        'x-osp-appid': '8931gfak30',
+        'x-osp-clientosversion': '15.8.3',
+      },
+    })
+      .then((res) => {
+        this.log.debug(JSON.stringify(res.data));
+        return res.data;
+      })
+      .catch((error) => {
+        this.log.error(error);
+        error.response && this.log.error(JSON.stringify(error.response.data));
+      });
+    await this.requestClient({
+      method: 'post',
+      maxBodyLength: Infinity,
+      url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
+      headers: {
+        'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-osp-clientversion': '3.6.2024042301',
+        accept: '*/*',
+        'x-osp-packageversion': '1.7.22',
+        'x-osp-packagename': 'com.samsung.oneconnect4ios',
+        'accept-language': 'de-DE,de;q=0.9',
+        'x-osp-clientmodel': 'iPhone',
+        'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
+        'x-osp-appid': '8931gfak30',
+        'x-osp-clientosversion': '15.8.3',
+      },
+      data: {
+        code: codeInfos.code,
+        client_id: '8931gfak30',
+        code_verifier:
+          'wrDywbkE1ukg0lV0XXKCBkevjyJj68kLzdGKNZhJfnCUOYvvJQ3hoBQU7NyOGUJfHq-I6B8M9Kxb7A-gjTE2gAFkmevYwb2q6JUUSjVbwNiBE8DYLqSZfcj5Pd8i1LLs',
+        grant_type: 'authorization_code',
+      },
+    })
+      .then((res) => {
+        this.log.debug(JSON.stringify(res.data));
+        this.session = res.data;
+        this.config.token = res.data.access_token;
+        return res.data;
+      })
+      .catch((error) => {
+        this.log.error(error);
+        error.response && this.log.error(JSON.stringify(error.response.data));
+      });
+  }
   async getDeviceList() {
     await this.requestClient({
       method: 'get',
@@ -273,14 +448,23 @@ class Smartthings extends utils.Adapter {
    * Is called when adapter shuts down - callback has to be called under any circumstances!
    * @param {() => void} callback
    */
-  onUnload(callback) {
+  async onUnload(callback) {
     try {
       this.setState('info.connection', false, true);
       clearTimeout(this.refreshTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
       clearInterval(this.updateVirtualInterval);
+      if (this.config.codeUrl) {
+        const adapterSettings = await this.getForeignObjectAsync('system.adapter.' + this.namespace);
+        if (adapterSettings) {
+          adapterSettings.native.codeUrl = null;
+          await this.setForeignObjectAsync('system.adapter.' + this.namespace, adapterSettings);
+        }
+      }
+
       callback();
     } catch (e) {
+      this.log.error(e);
       callback();
     }
   }

@@ -20,18 +20,18 @@
       function load(settings, onChange) {
         // example: select elements with id=key and class=value and insert value
         if (!settings) return;
-        $(".value").each(function () {
+        $('.value').each(function () {
           var $key = $(this);
-          var id = $key.attr("id");
-          if ($key.attr("type") === "checkbox") {
+          var id = $key.attr('id');
+          if ($key.attr('type') === 'checkbox') {
             // do not call onChange direct, because onChange could expect some arguments
-            $key.prop("checked", settings[id]).on("change", () => onChange());
+            $key.prop('checked', settings[id]).on('change', () => onChange());
           } else {
             // do not call onChange direct, because onChange could expect some arguments
             $key
               .val(settings[id])
-              .on("change", () => onChange())
-              .on("keyup", () => onChange());
+              .on('change', () => onChange())
+              .on('keyup', () => onChange());
           }
         });
         onChange(false);
@@ -43,14 +43,14 @@
       function save(callback) {
         // example: select elements with class=value and build settings object
         var obj = {};
-        $(".value").each(function () {
+        $('.value').each(function () {
           var $this = $(this);
-          if ($this.attr("type") === "checkbox") {
-            obj[$this.attr("id")] = $this.prop("checked");
-          } else if ($this.attr("type") === "number") {
-            obj[$this.attr("id")] = parseFloat($this.val());
+          if ($this.attr('type') === 'checkbox') {
+            obj[$this.attr('id')] = $this.prop('checked');
+          } else if ($this.attr('type') === 'number') {
+            obj[$this.attr('id')] = parseFloat($this.val());
           } else {
-            obj[$this.attr("id")] = $this.val();
+            obj[$this.attr('id')] = $this.val();
           }
         });
         callback(obj);
@@ -70,24 +70,39 @@
 
       <!-- For example columns with settings: -->
       <div class="row">
+        <div class="row">
+          <div class="col s6 input-field" id="codeInfo">
+            1. Open the Url below and login with your account until you see a white screen
+            <p></p>
+            2. Open Developer Console F12 or Option + Command + I
+            <p></p>
+            3. You see a failed redirect in the Console copy the samsungconnect:// url
+            <p></p>
+            <img src="copyurl.png" style="width: 30rem" />
+            <p></p>
+            4. Paste the url in the input field below
+  
+            <p></p>
+            <p></p>
+            <a
+              href="https://account.samsung.com/accounts/IOSSDK/signInGate?locale=de_DE&svcParam=ewogICJzdmNFbmNJViIgOiAiNzkzMDdFNDk0RjVGMkQ2RTU5Mzg1NzYyNUY0RTY4NDgiLAogICJjaGtEb051bSIgOiAiMSIsCiAgInN2Y0VuY0tZIiA6ICJZUFFlMDJNb1VRMVpvOUptUkZteUU3YjZVWHV0d3p5Qy1CRzlod09pNWpDYzMzTnpGcEdOZEZhWmoyd2pXTHltZUhtRkZDY2FqOVlybWhJbmJQZnBGS2tXZlBjVWZqbjNVZVVCa0wyeWZWVVZuRmZuUFA5b1FBRTdRbElXQUlma21GcDZ6eklQcElORVlGV2NUNzd5dFdCREtlMnZSdUxPSnR4UDg4VDBYU2siLAogICJzdmNFbmNQYXJhbSIgOiAiM2tLVU9OdkdFRWVjZjlnczRkT3lsVk9SVDBiNEV6ZE5LQVozRlZ5NW5OclM2blVFX1ZhQngySHdxcEFOUXkySkVmdURPNlRVbXM5WWtzQjlqbGtoU0J5VGpPSkxfV3JDaDhjSWx5VmhCMnZOR1FYaElNRGg0Q1FwanowV2V5dGJ4cS1NYjR6WGozNnhWZUlidklTTjRNMmUzajJySkdFUDdsRWRRSUk3QkpZNmw1UGJQMnlJNl82ZHhOZlVlT3Q1bHowXzJpUFRhYW1sX0drb00xcVFudndTR2NCZEhkc1NWQ3hEQkNxcHRlRVNxZkZ6Sl9pX2VLclFHdl9nTVo0R2xOVmVLRlA1WkluOE91UUIxdGNyUVNDZjBpM045UUEzeEdvdXpXUUdqZGszMWZkUlBoRXhPWEIxMEVvaVhtdnBkZmZVSWpsUlU0R3pNWkh6anJNTUt1M19IU0R2b09SVlZWdXg3a1NmVk05WXd1dHFIZW5KV01VWXhFVDkyaTBtSHpmZHMxWTZBYTdrR3c0QWhQMVNQR0Q1ZTh0Nm05NDkwV0VCZVMzOHpwRTFHTVN5M0RKbENFVHBPRGNjMG5MNnNVMTFGOTYwMFZBdHEyNVpDUlI5dUQ1NXpGb1ZBUUIyV0RDaE92RzZUTDFlLWhYdElVZ21aZTdOTE5BWlpIMjA1d2RJVnU2YlFHZnd4ZmNXdktFVjdKRUdFazg2ZnJZNHdOZ3FNaDRaZ2dDeUlzZ2t1RGpnS3ZIbnFyTDFHcXFTOUUwbkU3bl9JUFM4eFJlRDAzLWdhOXc2b2ROTXdsUS1hLXdSeDJZb2dQeEpJdjdITVJHQUVmZ3FNaDdhRnpJUWowY09rV0s0QVVQTWllTWhybVZsTkV1X0s5RzdPalRpTDJrN3J3eFlPaFlwV0F5T0p4RW1XVnV6cFhWcVhEUkFZWFNnLXhDU3JOTDB1Sm5rYm1KLUdNLTFPQ0M4QVAzWEI0RmxoMzNBZEx5Y1dfM3JLRHlwY2R4WFJQRGlIWEJCanhfSXJPQ3h2bmttTm43UmhvejJQZFpTQVFGQ0FzVnZDQjlOOVJOZjFvYjJZT3g0UXVtLURlOEtxVmFDZW14dGVoVFFkeTJjSmc5S2VVZmt3cDJacUxJdlhYbkxkaVF0V18zVlNINW9GZmRzSmxENUN2bVd0S0phTmV5elFEQUJjX0xrMmJNUm94WWVheFhlQUk3NllzNEVFUUk4VDNLeGFMT3h4VWdWblVtSUJiTkI1THVWNG1ma3NnQWFmYVk1Uk5nR1NXR0liNUlsTHlhdUwxOHBjTWU2SXEzamNzVzJ6VDdXSk1EYzcwVG5hOXlaLUxsczhTZ1lyRFVjODBWdDk3c2FDVDBNTXB4MVlyNmJyWnNWUHgyR2RCUVF6eVdxSFhybmRBeHVIT1hLN1VtV0ZlQ0RXbVdPSk5lendPdjRiUnJxV2VobmtYSHZ4UGhBbmNsT1NKWlUwUlFiSjkybzBsaVY2d1dSUnZ1dlpJUlQ5UzVZN2pPWjFkNnlWVzk0MEdZOGh2cFd1S1B1V2ExTTJkR3g1NHp6LXpFMmdWZHFEYjlhbVpqYnJZclVycUZqdUhoVVJEZFduVGNMd2dGejM3alVDVnhsbzVCWU8yOENJRkQ1Z0R1ekM2a2VoV2VUd05sSVdfV0ktbFFmdHRvR1kzdUpWVWdDVEcwS012eUxUbmdVaUZYUzhuNTdRcGliXzktZXc1eHZmM29MM0plRFlEbTZzSjdrQTRFIgp9"
+              target="_blank"
+              style="color: red !important"
+              >Smartthing Login Url CLICK HERE</a
+            >
+            <p></p>
+            <input
+              type="text"
+              class="value"
+              id="codeUrl"
+              placeholder="samsungconnect://samsungaccount/callback?action=authorize&code=8ff856dc8806....."
+            />
+            <label for="codeUrl" class="translate"> samsungconnect Url</label>
+          </div>
+        </div>
+      <div class="row">
         <div class="col s12 input-field">
-          <div class="col s12 translate">
-            <a href="https://account.smartthings.com/tokens" target="_blank">https://account.smartthings.com/tokens</a>
-          </div>
-          <br />
-          <p></p>
-          <div class="col s12 translate">
-            Visit the Link. Sign in with your Samsung account to be taken to the "Personal Access Tokens" page.
-          </div>
-          <div class="col s12 translate">Tap the “Generate new token” button, taking you to a “New Access Token” page.</div>
-          <div class="col s12 translate">
-            Provide a name for the new token. Select any functionality you wish to authorize for the token in the “Authorized Scopes”
-            section.
-          </div>
-          <div class="col s12 translate">
-            Tap the “Generate Token” button when ready, and you’ll return to the “Personal access tokens” page.
-          </div>
-          <div class="col s12 translate">Copy the newly generated token and insert in the settings.</div>
+          <div class="col s12 translate">DEPREACATED: Old Smarthings Token only 24h usable please use login method.</div>
         </div>
       </div>
       <div class="row">
