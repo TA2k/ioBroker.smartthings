@@ -83,7 +83,7 @@ class Smartthings extends utils.Adapter {
 
   async login() {
     this.log.info('Start login via code url');
-    //eslint-disable-next-line
+
     const initialPayload = {
       state:
         'vhSgCj2VZ6PU5L8KCkarHaUfd-cN2y1Qr31Xny3in-7Bs3gkc4gc6-n5SRxYmHkHFy-g3t3cMXb0n44663cSDW-lVYUve0KvNPAId7oNX32rHhyLUTxM153OOY3aE-XwacnslNkPUivJr-Gr3wk0qdRUlpiup-FlWL4SB7-w-IJChDHz5NcpsBjbdhS5DrGPKaOUC209ywDiHmvcxpj0IrLcQwcpTBT9-uuq0D82tBlA726OqQnv0WNMSLeQkU0ZzWlv',
@@ -133,6 +133,7 @@ class Smartthings extends utils.Adapter {
 
     decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
     let keyInformation = decipher.update(Buffer.from(parameter.state, 'hex'), undefined, 'utf8');
+    //eslint-disable-next-line
     keyInformation += decipher.final('utf8');
     this.log.info('Found code for user: ' + username);
     const userInfos = await this.requestClient({
