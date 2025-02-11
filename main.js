@@ -73,7 +73,7 @@ class Smartthings extends utils.Adapter {
         await this.refreshToken();
       }, this.session.expires_in * 1000);
     } else {
-      this.log.info('Please enter a Samsung Smartthings Token');
+      this.log.info('Please enter a valid codeUrl or Samsung Smartthings Token');
     }
   }
 
