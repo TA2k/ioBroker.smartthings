@@ -82,7 +82,7 @@ class Smartthings extends utils.Adapter {
   }
 
   async login() {
-    this.log.debug('Start login via code url');
+    this.log.info('Start login via code url');
     //eslint-disable-next-line
     const initialPayload = {
       state:
@@ -107,40 +107,47 @@ class Smartthings extends utils.Adapter {
     };
     this.key = 'SEmgtdtU3UgsuxAPTmOZKMXGD/WhIQAAAAAAAAAAAAA=';
     this.iv = 'eTB+SU9fLW5ZOFdiX05oSA==';
-    this.subKey = 'dmhTZ0NqMlZaNlBVNUw4S0NrYXJIYVVmZC1jTjJ5MVE=';
-    this.subIv = 'eTB+SU9fLW5ZOFdiX05oSA==';
+    //    this.subKey = 'dmhTZ0NqMlZaNlBVNUw4S0NrYXJIYVVmZC1jTjJ5MVE=';
+
     this.log.debug('Initial Login');
     if (!this.config.codeUrl) {
       this.log.error('Please enter a Samsung Smartthings Code Url in the instance settings');
       return;
     }
-    const code = qs.parse(this.config.codeUrl.split('?')[1]).code;
-    if (!code) {
+    const parameter = qs.parse(this.config.codeUrl.split('?')[1]);
+    if (!parameter.code) {
       this.log.error('No Code found in the codeUrl');
       return;
     }
-    const decipher = crypto.createDecipheriv(
-      'aes-128-cbc',
-      Buffer.from(this.subKey, 'base64').subarray(0, 16),
-      Buffer.from(this.subIv, 'base64'),
-    );
+    const subKey = Buffer.from(initialPayload.state.substring(0, 32), 'utf8').toString('base64');
+
+    let decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
     decipher.setAutoPadding(true);
-    let decrypted = decipher.update(Buffer.from(code, 'hex'), undefined, 'utf8');
-    decrypted += decipher.final('utf8');
-    this.log.debug(decrypted);
+    let codeDecrypted = decipher.update(Buffer.from(parameter.code, 'hex'), undefined, 'utf8');
+    codeDecrypted += decipher.final('utf8');
+    this.log.debug(codeDecrypted);
+    //reset decipher
+    decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
+    let username = decipher.update(Buffer.from(parameter.retValue, 'hex'), undefined, 'utf8');
+    username += decipher.final('utf8');
+
+    decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
+    let keyInformation = decipher.update(Buffer.from(parameter.state, 'hex'), undefined, 'utf8');
+    keyInformation += decipher.final('utf8');
+    this.log.info('Found code for user: ' + username);
     const userInfos = await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
       url: 'https://eu-auth2.samsungosp.com/auth/oauth2/authenticate',
       params: {
         client_id: 'a2pvoj8e5q',
-        code: decrypted,
+        code: codeDecrypted,
         code_verifier:
           'ZVM-W29DXe3izFprmGcq45UAzkY0UFLHl-f2CP0EFlY3CiE18V_MrKQ4d0U~7FCZZ8wLwa.adiHENmMx44QKQhy8wEkXR3BfNbDkzJ1AwdVRh72-49CYhu-B12_.8CwF',
         grant_type: 'authorization_code',
         physical_address_text: '0E39C792-26A0-4EC0-8822-7C61A8217E99',
         service_type: 'M',
-        username: this.config.username,
+        username: username,
       },
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
@@ -154,10 +161,10 @@ class Smartthings extends utils.Adapter {
         'x-osp-clientosversion': '15.8.3',
       },
       data: {
-        code: decrypted,
+        code: codeDecrypted,
         service_type: 'M',
         grant_type: 'authorization_code',
-        username: this.config.username,
+        username: username,
         code_verifier:
           'ZVM-W29DXe3izFprmGcq45UAzkY0UFLHl-f2CP0EFlY3CiE18V_MrKQ4d0U~7FCZZ8wLwa.adiHENmMx44QKQhy8wEkXR3BfNbDkzJ1AwdVRh72-49CYhu-B12_.8CwF',
         client_id: 'a2pvoj8e5q',
@@ -259,6 +266,7 @@ class Smartthings extends utils.Adapter {
           },
           native: {},
         });
+        this.log.info('Login successful.');
         await this.setState('authInformation.session', JSON.stringify(this.session), true);
         this.config.token = res.data.access_token;
         return res.data;

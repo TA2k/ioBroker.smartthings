@@ -97,7 +97,6 @@
   "protectedNative": ["token"],
   "native": {
     "token": "",
-    "username": "",
     "codeUrl": "",
     "interval": 10,
     "virtualInterval": 0,
