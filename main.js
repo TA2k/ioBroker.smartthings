@@ -12,7 +12,7 @@ const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
 const crypto = require('crypto');
 const qs = require('qs');
-
+const EventSource = require('eventsource');
 class Smartthings extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -33,6 +33,7 @@ class Smartthings extends utils.Adapter {
     this.session = {};
     this.ocfDeviceFactory = new OcfDeviceFactory();
     this.session = {};
+    this.locationIds = [];
   }
 
   /**
@@ -59,6 +60,7 @@ class Smartthings extends utils.Adapter {
 
     if (this.config.token) {
       await this.getDeviceList();
+      await this.connectSSE();
       await this.updateDevices();
       this.updateInterval = setInterval(async () => {
         await this.updateDevices();
@@ -274,6 +276,167 @@ class Smartthings extends utils.Adapter {
       });
   }
 
+  async connectSSE() {
+    const subscriptionId = await this.requestClient({
+      method: 'post',
+      maxBodyLength: Infinity,
+      url: 'https://api.smartthings.com/subscriptions',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/vnd.smartthings+json;v=20201106',
+        authorization: 'Bearer ' + this.config.token,
+        'x-st-client-devicemodel': 'iPhone',
+        'accept-language': 'de-DE',
+        'x-st-client-appversion': '1.7.22',
+        'x-st-correlation': '5D6889C3-3EFF-4677-8A27-D1819E6A34C3',
+        'user-agent': 'iOS/OneApp/1.7.22 iPhone; iOS/15.8.3 SmartThingsCore/6.280.5',
+        'x-st-client-os': 'iOS 15.8.3',
+      },
+      data: {
+        name: 'iOS SSE Subscription',
+        subscriptionFilters: [
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['DEVICE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['INSTALLED_APP_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['DEVICE_HEALTH_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['USER_SETTINGS_SORT_ORDER_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['SCENE_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['SMART_APP_DASHBOARD_CARD_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: ['ALL'],
+            eventType: ['LOCATION_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: ['ALL'],
+            eventType: ['DEVICE_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['ROOM_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['HUB_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: ['ALL'],
+            eventType: ['DEVICE_OWNERSHIP_TRANSFER_STATUS_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['DEVICE_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['FAVORITE_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: ['ALL'],
+            eventType: ['INSTALLED_APP_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: ['ALL'],
+            eventType: ['INVITATION_LIFECYCLE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['HUB_HEALTH_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: ['ALL'],
+            eventType: ['PAID_SUBSCRIPTIONS_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['MODE_EVENT'],
+          },
+          {
+            type: 'LOCATIONIDS',
+            value: this.locationIds,
+            eventType: ['INVITATION_LIFECYCLE_EVENT'],
+          },
+        ],
+      },
+    })
+      .then((res) => {
+        this.log.debug(JSON.stringify(res.data));
+        return res.data.subscriptionId;
+      })
+      .catch((error) => {
+        this.log.error('Failed to create subscription');
+        this.log.error(error);
+        error.response && this.log.error(JSON.stringify(error.response.data));
+      });
+
+    const es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
+      headers: {
+        Authorization: `Bearer ${this.config.token}`,
+        version: 'application/vnd.smartthings+json;v=20250122',
+      },
+    });
+    es.onopen = () => {
+      console.log('Connected to SmartThings SSE endpoint.');
+    };
+
+    es.onerror = (err) => {
+      console.error('Error with SSE connection:', err);
+    };
+
+    es.onmessage = (event) => {
+      console.log('Received event:', event.data);
+      // Optionally, parse the JSON data
+      try {
+        const data = JSON.parse(event.data);
+        // Check if the event type is DEVICE_EVENT and process it
+        if (data.event === 'DEVICE_EVENT') {
+          console.log('Processing device event:', data);
+          // Insert custom logic here, e.g., trigger a callback based on device ID, etc.
+        }
+      } catch (error) {
+        console.error('Error parsing event data:', error);
+      }
+    };
+
+    // Optionally, if the server sends named events, you can listen for them:
+    es.addEventListener('DEVICE_EVENT', (event) => {
+      console.log('Device event received via addEventListener:', event.data);
+    });
+  }
   async refreshToken() {
     if (!this.session.refresh_token) {
       this.log.debug('No refresh_token found');
@@ -328,10 +491,12 @@ class Smartthings extends utils.Adapter {
     })
       .then(async (res) => {
         this.log.debug(JSON.stringify(res.data));
-
         this.setState('info.connection', true, true);
         this.log.info(res.data.items.length + ' devices detected');
         for (const device of res.data.items) {
+          if (!this.locationIds.includes(device.locationId)) {
+            this.locationIds.push(device.locationId);
+          }
           const exlcudeList = this.config.excludeDevices.replace(/ /g, '').split(',');
           if (exlcudeList && exlcudeList.includes(device.deviceId)) {
             this.log.info('Ignore ' + device.deviceId);
