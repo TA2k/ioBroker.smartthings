@@ -48,7 +48,7 @@ https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
 
 MIT License
 
-Copyright (c) 2021-2030 TA2k <tombox2020@gmail.com>
+Copyright (c) 2021-2026 TA2k <tombox2020@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
