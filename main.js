@@ -34,6 +34,9 @@ class Smartthings extends utils.Adapter {
     this.ocfDeviceFactory = new OcfDeviceFactory();
     this.session = {};
     this.locationIds = [];
+    this.responseCache = {};
+    this.excludeDeviceSet = new Set();
+    this.excludeStateEndingsArray = [];
   }
 
   /**
@@ -46,6 +49,12 @@ class Smartthings extends utils.Adapter {
       this.log.info('Set interval to minimum 1');
       this.config.interval = 1;
     }
+
+    // Cache exclude lists at startup to avoid parsing on every iteration
+    this.excludeDeviceSet = new Set(
+      this.config.excludeDevices.replace(/ /g, '').split(',').filter(Boolean)
+    );
+    this.excludeStateEndingsArray = this.config.exclude.replace(/ /g, '').split(',').filter(Boolean);
 
     this.subscribeStates('*');
 
@@ -410,31 +419,39 @@ class Smartthings extends utils.Adapter {
       },
     });
     es.onopen = () => {
-      console.log('Connected to SmartThings SSE endpoint.');
+      this.log.info('Connected to SmartThings SSE endpoint.');
     };
 
     es.onerror = (err) => {
-      console.error('Error with SSE connection:', err);
+      this.log.error('Error with SSE connection: ' + JSON.stringify(err));
     };
 
-    es.onmessage = (event) => {
-      console.log('Received event:', event.data);
-      // Optionally, parse the JSON data
+    es.onmessage = async (event) => {
+      this.log.debug('Received SSE event: ' + event.data);
       try {
         const data = JSON.parse(event.data);
-        // Check if the event type is DEVICE_EVENT and process it
-        if (data.event === 'DEVICE_EVENT') {
-          console.log('Processing device event:', data);
-          // Insert custom logic here, e.g., trigger a callback based on device ID, etc.
+        // APK uses eventType field, not event
+        if (data.eventType === 'DEVICE_EVENT' && data.deviceEvent) {
+          const de = data.deviceEvent;
+          this.log.debug(`Device event: ${de.deviceId} ${de.capability}.${de.attribute} = ${de.value}`);
+
+          // Update state directly from SSE event (real-time update)
+          const statePath = `${de.deviceId}.status.components.main.${de.capability}.${de.attribute}.value`;
+          if (de.stateChange) {
+            await this.setStateAsync(statePath, de.value, true);
+            this.log.debug(`Updated state via SSE: ${statePath} = ${de.value}`);
+          }
+        } else if (data.eventType === 'DEVICE_HEALTH_EVENT' && data.deviceHealthEvent) {
+          const dhe = data.deviceHealthEvent;
+          this.log.debug(`Device health: ${dhe.deviceId} = ${dhe.status}`);
         }
       } catch (error) {
-        console.error('Error parsing event data:', error);
+        this.log.error('Error parsing SSE event data: ' + error);
       }
     };
 
-    // Optionally, if the server sends named events, you can listen for them:
     es.addEventListener('DEVICE_EVENT', (event) => {
-      console.log('Device event received via addEventListener:', event.data);
+      this.log.debug('Device event received via addEventListener: ' + event.data);
     });
   }
   async refreshToken() {
@@ -497,8 +514,7 @@ class Smartthings extends utils.Adapter {
           if (!this.locationIds.includes(device.locationId)) {
             this.locationIds.push(device.locationId);
           }
-          const exlcudeList = this.config.excludeDevices.replace(/ /g, '').split(',');
-          if (exlcudeList && exlcudeList.includes(device.deviceId)) {
+          if (this.excludeDeviceSet.has(device.deviceId)) {
             this.log.info('Ignore ' + device.deviceId);
             continue;
           }
@@ -637,58 +653,61 @@ class Smartthings extends utils.Adapter {
       'User-Agent': 'ioBroker',
       Authorization: 'Bearer ' + this.config.token,
     };
-    this.deviceArray.forEach(async (device) => {
-      if (onlyVirtualSwitch) {
-        if (device.type !== 'Virtual Switch') {
-          return;
-        }
+    for (const device of this.deviceArray) {
+      if (onlyVirtualSwitch && device.type !== 'Virtual Switch') {
+        continue;
       }
-      statusArray.forEach(async (element) => {
+      for (const element of statusArray) {
         const url = element.url.replace('$id', device.id);
 
-        await this.requestClient({
-          method: 'get',
-          url: url,
-          headers: headers,
-        })
-          .then(async (res) => {
-            this.log.debug(JSON.stringify(res.data));
-            if (!res.data) {
-              return;
-            }
-            let data = res.data;
-            let keys = Object.keys(data);
-            if (keys.length === 1) {
-              data = data[keys[0]];
-            }
-            keys = Object.keys(data);
-            if (keys.length === 1) {
-              data = data[keys[0]];
-            }
-            const forceIndex = undefined;
-            const preferedArrayName = undefined;
-
-            await this.json2iob.parse(device.id + '.' + element.path, data, {
-              forceIndex: forceIndex,
-              preferedArrayName: preferedArrayName,
-              channelName: element.desc,
-              excludeStateWithEnding: this.config.exclude.replace(/ /g, '').split(','),
-            });
-          })
-          .catch((error) => {
-            if (error.response && error.response.status === 401) {
-              error.response && this.log.debug(JSON.stringify(error.response.data));
-              this.log.info(element.path + ' receive 401 error. Please use new Token');
-
-              return;
-            }
-
-            this.log.error(url);
-            this.log.error(error);
-            error.response && this.log.error(JSON.stringify(error.response.data));
+        try {
+          const res = await this.requestClient({
+            method: 'get',
+            url: url,
+            headers: headers,
           });
-      });
-    });
+
+          this.log.debug(JSON.stringify(res.data));
+          if (!res.data) {
+            continue;
+          }
+          let data = res.data;
+          let keys = Object.keys(data);
+          if (keys.length === 1) {
+            data = data[keys[0]];
+          }
+          keys = Object.keys(data);
+          if (keys.length === 1) {
+            data = data[keys[0]];
+          }
+          const forceIndex = undefined;
+          const preferedArrayName = undefined;
+
+          const cacheKey = device.id + '.' + element.path;
+          const previousData = this.responseCache[cacheKey];
+
+          await this.json2iob.parse(device.id + '.' + element.path, data, {
+            forceIndex: forceIndex,
+            preferedArrayName: preferedArrayName,
+            channelName: element.desc,
+            excludeStateWithEnding: this.excludeStateEndingsArray,
+            previousData: previousData,
+          });
+
+          this.responseCache[cacheKey] = data;
+        } catch (error) {
+          if (error.response && error.response.status === 401) {
+            error.response && this.log.debug(JSON.stringify(error.response.data));
+            this.log.info(element.path + ' receive 401 error. Please use new Token');
+            continue;
+          }
+
+          this.log.error(url);
+          this.log.error(error);
+          error.response && this.log.error(JSON.stringify(error.response.data));
+        }
+      }
+    }
   }
 
   /**
