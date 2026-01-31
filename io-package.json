@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "smartthings",
-    "version": "0.2.2",
+    "version": "0.3.0",
     "news": {
+      "0.3.0": {
+        "en": "optimize cpu usage",
+        "de": "cpu-nutzung optimieren",
+        "ru": "оптимизация использования cpu",
+        "pt": "otimizar o uso de cpu",
+        "nl": "cpu-gebruik optimaliseren",
+        "fr": "optimiser l'utilisation de cpu",
+        "it": "ottimizzare l'utilizzo di cpu",
+        "es": "optimizar el uso de cpu",
+        "pl": "optymalizacja korzystania z cpu",
+        "uk": "оптимізація використання cpu",
+        "zh-cn": "优化 cpu 使用"
+      },
       "0.2.2": {
         "en": "add new login process",
         "de": "neuer login-prozess hinzugefügt",
@@ -79,8 +92,13 @@
       "pl": "Adapter do Samsung Smartthings",
       "zh-cn": "适用于三星 Smartthings 的适配器"
     },
-    "authors": ["TA2k <tombox2020@gmail.com>"],
-    "keywords": ["samsung", "smartthings"],
+    "authors": [
+      "TA2k <tombox2020@gmail.com>"
+    ],
+    "keywords": [
+      "samsung",
+      "smartthings"
+    ],
     "license": "MIT",
     "platform": "Javascript/Node.js",
     "main": "main.js",
@@ -106,8 +124,12 @@
       }
     ]
   },
-  "encryptedNative": ["token"],
-  "protectedNative": ["token"],
+  "encryptedNative": [
+    "token"
+  ],
+  "protectedNative": [
+    "token"
+  ],
   "native": {
     "token": "",
     "codeUrl": "",
