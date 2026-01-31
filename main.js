@@ -12,7 +12,7 @@ const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
 const crypto = require('crypto');
 const qs = require('qs');
-const EventSource = require('eventsource');
+const { EventSource } = require('eventsource');
 class Smartthings extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -413,10 +413,14 @@ class Smartthings extends utils.Adapter {
       });
 
     const es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
-      headers: {
-        Authorization: `Bearer ${this.config.token}`,
-        version: 'application/vnd.smartthings+json;v=20250122',
-      },
+      fetch: (input, init) => fetch(input, {
+        ...init,
+        headers: {
+          ...init.headers,
+          Authorization: `Bearer ${this.config.token}`,
+          version: 'application/vnd.smartthings+json;v=20250122',
+        },
+      }),
     });
     es.onopen = () => {
       this.log.info('Connected to SmartThings SSE endpoint.');
