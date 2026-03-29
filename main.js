@@ -10,7 +10,7 @@ const utils = require('@iobroker/adapter-core');
 const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
 class Smartthings extends utils.Adapter {
