@@ -47,6 +47,8 @@ https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
 
 - 0.0.3 (TA2k) initial release
 
+[Older changelogs can be found there](CHANGELOG_OLD.md)
+
 ## License
 
 MIT License
