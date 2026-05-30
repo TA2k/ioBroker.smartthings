@@ -30,6 +30,10 @@ smartthings.0.id.capabilities either set to true or set a predefined value
 https://forum.iobroker.net/topic/48091/test-adapter-samsung-smartthings-v-0-0-x
 
 ## Changelog
+
+### **WORK IN PROGRESS**
+- (ioBroker-Bot) Adapter requires js-controller >= 6.0.11 now.
+
 ### 0.3.0 (2026-01-31)
 - optimize cpu usage
 
