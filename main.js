@@ -10,6 +10,7 @@ const utils = require('@iobroker/adapter-core');
 const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
+const { compactStatus } = require('./lib/compactStatus');
 const crypto = require('crypto');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
@@ -35,6 +36,7 @@ class Smartthings extends utils.Adapter {
     this.session = {};
     this.locationIds = [];
     this.responseCache = {};
+    this.rawResponseCache = {};
     this.excludeDeviceSet = new Set();
     this.excludeStateEndingsArray = [];
   }
@@ -688,6 +690,11 @@ class Smartthings extends utils.Adapter {
           const preferedArrayName = undefined;
 
           const cacheKey = device.id + '.' + element.path;
+          const rawData = data;
+          const previousRawData = this.rawResponseCache[cacheKey];
+          if (this.config.compactMode) {
+            data = compactStatus(data, previousRawData);
+          }
           const previousData = this.responseCache[cacheKey];
 
           await this.json2iob.parse(device.id + '.' + element.path, data, {
@@ -698,6 +705,7 @@ class Smartthings extends utils.Adapter {
             previousData: previousData,
           });
 
+          this.rawResponseCache[cacheKey] = rawData;
           this.responseCache[cacheKey] = data;
         } catch (error) {
           if (error.response && error.response.status === 401) {

@@ -1,30 +1,83 @@
 'use strict';
 
-/**
- * This is a dummy TypeScript test file using chai and mocha
- *
- * It's automatically excluded from npm and its build output is excluded from both git and npm.
- * It is advised to test all your modules with accompanying *.test.js-files
- */
-
-// tslint:disable:no-unused-expression
-
 const { expect } = require('chai');
-// import { functionToTest } from "./moduleToTest";
+const { compactStatus } = require('./lib/compactStatus');
 
-describe('module to test => function to test', () => {
-  // initializing logic
-  const expected = 5;
+describe('compactStatus', () => {
+  it('removes persistently empty values and empty containers', () => {
+    const current = {
+      component: {
+        emptyString: '',
+        nullValue: null,
+        undefinedValue: undefined,
+        emptyObject: {},
+        emptyArray: [],
+        power: 0,
+        enabled: false,
+        mode: 'cooling',
+      },
+    };
 
-  it(`should return ${expected}`, () => {
-    const result = 5;
-    // assign result a value from functionToTest
-    expect(result).to.equal(expected);
-    // or using the should() syntax
-    result.should.equal(expected);
+    expect(compactStatus(current)).to.deep.equal({
+      component: {
+        power: 0,
+        enabled: false,
+        mode: 'cooling',
+      },
+    });
   });
-  // ... more tests => it
 
+  it('keeps an empty value once when it clears a previous value', () => {
+    const current = {
+      component: {
+        temperature: null,
+        door: '',
+      },
+    };
+    const previous = {
+      component: {
+        temperature: 6,
+        door: 'open',
+      },
+    };
+
+    expect(compactStatus(current, previous)).to.deep.equal(current);
+  });
+
+  it('removes an empty value when the previous value was already empty', () => {
+    const current = {
+      component: {
+        temperature: null,
+        door: '',
+      },
+    };
+    const previous = {
+      component: {
+        temperature: null,
+        door: '',
+      },
+    };
+
+    expect(compactStatus(current, previous)).to.deep.equal({});
+  });
+
+  it('preserves non-empty arrays and their indexes', () => {
+    const current = {
+      values: [0, '', false, null],
+    };
+
+    expect(compactStatus(current)).to.deep.equal(current);
+  });
+
+  it('does not mutate current or previous payloads', () => {
+    const current = { component: { value: '', enabled: false } };
+    const previous = { component: { value: '', enabled: true } };
+    const currentBefore = JSON.stringify(current);
+    const previousBefore = JSON.stringify(previous);
+
+    compactStatus(current, previous);
+
+    expect(JSON.stringify(current)).to.equal(currentBefore);
+    expect(JSON.stringify(previous)).to.equal(previousBefore);
+  });
 });
-
-// ... more test suites => describe

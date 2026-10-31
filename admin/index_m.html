@@ -142,6 +142,19 @@
       </div>
       <div class="row">
         <div class="col s12 input-field">
+          <p>
+            <label>
+              <input type="checkbox" class="value" id="compactMode" />
+              <span class="translate">Compact mode (skip persistently empty status values)</span>
+            </label>
+          </p>
+          <div class="translate">
+            Reduces the number of generated objects. Empty values that replace a previous value are still written once to prevent stale states.
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col s12 input-field">
           <input type="text" class="value" id="excludeDevices" />
           <label for="excludeDevices" class="translate"
             >Exclude Devices. Comma separated values with Device Id XXXXXXX-XXXX-XXXX-XXXX-XXXXXXX
