@@ -483,10 +483,11 @@ class Smartthings extends utils.Adapter {
   async refreshToken() {
     if (!this.session.refresh_token) {
       this.log.debug('No refresh_token found');
-      return;
+      return false;
     }
     this.log.debug('Start refresh token');
-    await this.requestClient({
+    try {
+      const res = await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
       url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
@@ -508,17 +509,21 @@ class Smartthings extends utils.Adapter {
         client_id: '8931gfak30',
         grant_type: 'refresh_token',
       },
-    })
-      .then(async (res) => {
-        this.session = res.data;
-        await this.setState('authInformation.session', JSON.stringify(this.session), true);
-        this.config.token = res.data.access_token;
-        return res.data;
-      })
-      .catch((error) => {
-        this.log.error(formatRequestError(error));
-        this.log.error('Refresh Token failed please delete authInformation.session and enter a new code Url');
       });
+      const nextSession = mergeRefreshedSession(this.session, res && res.data);
+      if (!nextSession) {
+        this.log.error('SmartThings refresh response contains no usable tokens');
+        return false;
+      }
+      await this.setStateAsync('authInformation.session', JSON.stringify(nextSession), true);
+      this.session = nextSession;
+      this.config.token = nextSession.access_token;
+      return true;
+    } catch (error) {
+      this.log.error(formatRequestError(error));
+      this.log.warn('SmartThings token refresh failed; reauthorization may be required');
+      return false;
+    }
   }
 
   async getDeviceList() {
