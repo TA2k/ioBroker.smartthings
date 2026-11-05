@@ -821,7 +821,7 @@ class Smartthings extends utils.Adapter {
     }
     try {
       this.setState('info.connection', false, true);
-      clearTimeout(this.refreshTimeout);
+      this.refreshTimeout && clearTimeout(this.refreshTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
       clearInterval(this.updateVirtualInterval);
       if (this.config.codeUrl) {
