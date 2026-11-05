@@ -549,27 +549,27 @@ class Smartthings extends utils.Adapter {
     this.log.debug('Start refresh token');
     try {
       const res = await this.requestClient({
-      method: 'post',
-      maxBodyLength: Infinity,
-      url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
-      headers: {
-        'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
-        'content-type': 'application/x-www-form-urlencoded',
-        'x-osp-clientversion': '3.6.2024042301',
-        accept: '*/*',
-        'x-osp-packageversion': '1.7.22',
-        'x-osp-packagename': 'com.samsung.oneconnect4ios',
-        'accept-language': 'de-DE,de;q=0.9',
-        'x-osp-clientmodel': 'iPhone',
-        'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
-        'x-osp-appid': '8931gfak30',
-        'x-osp-clientosversion': '15.8.3',
-      },
-      data: {
-        refresh_token: this.session.refresh_token,
-        client_id: '8931gfak30',
-        grant_type: 'refresh_token',
-      },
+        method: 'post',
+        maxBodyLength: Infinity,
+        url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
+        headers: {
+          'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-osp-clientversion': '3.6.2024042301',
+          accept: '*/*',
+          'x-osp-packageversion': '1.7.22',
+          'x-osp-packagename': 'com.samsung.oneconnect4ios',
+          'accept-language': 'de-DE,de;q=0.9',
+          'x-osp-clientmodel': 'iPhone',
+          'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
+          'x-osp-appid': '8931gfak30',
+          'x-osp-clientosversion': '15.8.3',
+        },
+        data: {
+          refresh_token: this.session.refresh_token,
+          client_id: '8931gfak30',
+          grant_type: 'refresh_token',
+        },
       });
       const nextSession = mergeRefreshedSession(this.session, res && res.data);
       if (!nextSession) {
