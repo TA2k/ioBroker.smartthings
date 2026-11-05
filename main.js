@@ -516,7 +516,7 @@ class Smartthings extends utils.Adapter {
   }
 
   async getDeviceList() {
-    await this.requestClient({
+    return this.requestClient({
       method: 'get',
       url: 'https://api.smartthings.com/v1/devices',
       headers: {
@@ -525,6 +525,10 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
+        if (!res || !res.data || !Array.isArray(res.data.items)) {
+          this.log.error('SmartThings device list response is invalid');
+          return false;
+        }
         this.log.debug(JSON.stringify(res.data));
         this.setState('info.connection', true, true);
         this.log.info(res.data.items.length + ' devices detected');
@@ -650,9 +654,12 @@ class Smartthings extends utils.Adapter {
           }
           await this.json2iob.parse(device.deviceId + '.general', device);
         }
+        return true;
       })
       .catch((error) => {
+        this.setState('info.connection', false, true);
         this.log.error(formatRequestError(error));
+        return false;
       });
   }
 
