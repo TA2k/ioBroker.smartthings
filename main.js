@@ -11,6 +11,13 @@ const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
 const { compactStatus } = require('./lib/compactStatus');
+const {
+  normalizePollingInterval,
+  normalizeVirtualInterval,
+  parseExclusionList,
+  parseStoredSession,
+  formatRequestError,
+} = require('./lib/startupSafety');
 const crypto = require('crypto');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
@@ -47,26 +54,35 @@ class Smartthings extends utils.Adapter {
   async onReady() {
     // Reset the connection indicator during startup
     this.setState('info.connection', false, true);
-    if (this.config.interval < 1) {
-      this.log.info('Set interval to minimum 1');
-      this.config.interval = 1;
+    const pollingInterval = normalizePollingInterval(this.config.interval);
+    if (pollingInterval !== this.config.interval) {
+      this.log.warn('Invalid or too-small polling interval; applying a safe value');
     }
+    this.config.interval = pollingInterval;
+    this.config.virtualInterval = normalizeVirtualInterval(this.config.virtualInterval);
 
-    // Cache exclude lists at startup to avoid parsing on every iteration
-    this.excludeDeviceSet = new Set(
-      this.config.excludeDevices.replace(/ /g, '').split(',').filter(Boolean)
-    );
-    this.excludeStateEndingsArray = this.config.exclude.replace(/ /g, '').split(',').filter(Boolean);
+    // Older adapter installations may not have all configuration keys.
+    this.excludeDeviceSet = new Set(parseExclusionList(this.config.excludeDevices));
+    this.excludeStateEndingsArray = parseExclusionList(this.config.exclude);
 
     this.subscribeStates('*');
 
-    const authState = await this.getStateAsync('authInformation.session');
-    if (authState && authState.val) {
-      this.session = JSON.parse(authState.val);
-      this.log.info('Use existing session to login');
-      await this.refreshToken();
-    } else {
-      await this.login();
+    try {
+      const authState = await this.getStateAsync('authInformation.session');
+      const storedSession = parseStoredSession(authState && authState.val);
+      if (storedSession) {
+        this.session = storedSession;
+        this.log.info('Use existing session to login');
+        await this.refreshToken();
+      } else {
+        if (authState && authState.val) {
+          this.log.warn('Stored SmartThings session is invalid; a new login may be required');
+        }
+        await this.login();
+      }
+    } catch (error) {
+      this.log.error('SmartThings authentication failed: ' + formatRequestError(error));
+      return;
     }
 
     if (this.config.token) {
@@ -123,28 +139,29 @@ class Smartthings extends utils.Adapter {
       this.log.error('Please enter a Samsung Smartthings Code Url in the instance settings');
       return;
     }
-    const parameter = qs.parse(this.config.codeUrl.split('?')[1]);
-    if (!parameter.code) {
-      this.log.error('No Code found in the codeUrl');
+    const parameter = qs.parse(typeof this.config.codeUrl === 'string' ? this.config.codeUrl.split('?')[1] : '');
+    if (typeof parameter.code !== 'string' || typeof parameter.retValue !== 'string' || typeof parameter.state !== 'string') {
+      this.log.error('Invalid SmartThings code URL; please enter a new callback URL');
       return;
     }
-    const subKey = Buffer.from(initialPayload.state.substring(0, 32), 'utf8').toString('base64');
 
-    let decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
-    decipher.setAutoPadding(true);
-    let codeDecrypted = decipher.update(Buffer.from(parameter.code, 'hex'), undefined, 'utf8');
-    codeDecrypted += decipher.final('utf8');
-    this.log.debug(codeDecrypted);
-    //reset decipher
-    decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
-    let username = decipher.update(Buffer.from(parameter.retValue, 'hex'), undefined, 'utf8');
-    username += decipher.final('utf8');
+    let codeDecrypted;
+    let username;
+    try {
+      const subKey = Buffer.from(initialPayload.state.substring(0, 32), 'utf8').subarray(0, 16);
+      const iv = Buffer.from(this.iv, 'base64');
+      const decrypt = (encrypted) => {
+        const decipher = crypto.createDecipheriv('aes-128-cbc', subKey, iv);
+        return decipher.update(Buffer.from(encrypted, 'hex'), undefined, 'utf8') + decipher.final('utf8');
+      };
+      codeDecrypted = decrypt(parameter.code);
+      username = decrypt(parameter.retValue);
+      decrypt(parameter.state);
+    } catch {
+      this.log.error('Unable to decode SmartThings code URL; please generate a new one');
+      return;
+    }
 
-    decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
-    let keyInformation = decipher.update(Buffer.from(parameter.state, 'hex'), undefined, 'utf8');
-    //eslint-disable-next-line
-    keyInformation += decipher.final('utf8');
-    this.log.info('Found code for user: ' + username);
     const userInfos = await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
@@ -182,12 +199,10 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
         return res.data;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
         this.log.error('Please use a new code url');
       });
     if (!userInfos || !userInfos.userauth_token) {
@@ -223,13 +238,15 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
         return res.data;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
       });
+    if (!codeInfos || typeof codeInfos.code !== 'string') {
+      this.log.error('SmartThings authorization did not return a code');
+      return;
+    }
     await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
@@ -256,7 +273,6 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
-        this.log.debug(JSON.stringify(res.data));
         this.session = res.data;
         await this.extendObject('authInformation', {
           type: 'channel',
@@ -282,8 +298,7 @@ class Smartthings extends utils.Adapter {
         return res.data;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
       });
   }
 
@@ -410,8 +425,7 @@ class Smartthings extends utils.Adapter {
       })
       .catch((error) => {
         this.log.error('Failed to create subscription');
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
       });
 
     const es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
@@ -429,7 +443,7 @@ class Smartthings extends utils.Adapter {
     };
 
     es.onerror = (err) => {
-      this.log.error('Error with SSE connection: ' + JSON.stringify(err));
+      this.log.error('Error with SSE connection: ' + formatRequestError(err));
     };
 
     es.onmessage = async (event) => {
@@ -452,7 +466,7 @@ class Smartthings extends utils.Adapter {
           this.log.debug(`Device health: ${dhe.deviceId} = ${dhe.status}`);
         }
       } catch (error) {
-        this.log.error('Error parsing SSE event data: ' + error);
+        this.log.error('Error parsing SSE event data: ' + formatRequestError(error));
       }
     };
 
@@ -490,15 +504,13 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
-        this.log.debug(JSON.stringify(res.data));
         this.session = res.data;
         await this.setState('authInformation.session', JSON.stringify(this.session), true);
         this.config.token = res.data.access_token;
         return res.data;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
         this.log.error('Refresh Token failed please delete authInformation.session and enter a new code Url');
       });
   }
@@ -632,8 +644,7 @@ class Smartthings extends utils.Adapter {
                   });
                 })
                 .catch((error) => {
-                  this.log.error(error);
-                  error.response && this.log.error(JSON.stringify(error.response.data));
+                  this.log.error(formatRequestError(error));
                 });
             });
           }
@@ -641,8 +652,7 @@ class Smartthings extends utils.Adapter {
         }
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
       });
   }
 
@@ -709,14 +719,12 @@ class Smartthings extends utils.Adapter {
           this.responseCache[cacheKey] = data;
         } catch (error) {
           if (error.response && error.response.status === 401) {
-            error.response && this.log.debug(JSON.stringify(error.response.data));
             this.log.info(element.path + ' receive 401 error. Please use new Token');
             continue;
           }
 
           this.log.error(url);
-          this.log.error(error);
-          error.response && this.log.error(JSON.stringify(error.response.data));
+          this.log.error(formatRequestError(error));
         }
       }
     }
@@ -742,7 +750,7 @@ class Smartthings extends utils.Adapter {
 
       callback();
     } catch (e) {
-      this.log.error(e);
+      this.log.error(formatRequestError(e));
       callback();
     }
   }
@@ -783,7 +791,7 @@ class Smartthings extends utils.Adapter {
           }
         }
 
-        this.log.info(JSON.stringify(data));
+        this.log.debug('Sending SmartThings device command');
         await this.requestClient({
           method: 'post',
           url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
@@ -794,13 +802,12 @@ class Smartthings extends utils.Adapter {
           data: data,
         })
           .then((res) => {
-            this.log.info(JSON.stringify(res.data));
+            this.log.debug('SmartThings device command accepted');
             return res.data;
           })
           .catch((error) => {
-            this.log.error(error);
+            this.log.error(formatRequestError(error));
             if (error.response) {
-              this.log.error(JSON.stringify(error.response.data));
             }
           });
         clearTimeout(this.refreshTimeout);
