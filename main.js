@@ -807,8 +807,6 @@ class Smartthings extends utils.Adapter {
           })
           .catch((error) => {
             this.log.error(formatRequestError(error));
-            if (error.response) {
-            }
           });
         clearTimeout(this.refreshTimeout);
         this.refreshTimeout = setTimeout(async () => {
