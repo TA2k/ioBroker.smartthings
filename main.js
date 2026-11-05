@@ -14,6 +14,10 @@ const { compactStatus } = require('./lib/compactStatus');
 const {
   normalizePollingInterval,
   normalizeVirtualInterval,
+  isPollingIntervalAdjusted,
+  getTokenRefreshDelayMs,
+  hasAccessToken,
+  mergeRefreshedSession,
   parseExclusionList,
   parseStoredSession,
   formatRequestError,
@@ -35,6 +39,8 @@ class Smartthings extends utils.Adapter {
     this.on('unload', this.onUnload.bind(this));
     this.requestClient = axios.create();
     this.updateInterval = null;
+    this.refreshInterval = null;
+    this.shuttingDown = false;
     this.reLoginTimeout = null;
     this.json2iob = new Json2iob(this);
     this.deviceArray = [];
@@ -52,10 +58,10 @@ class Smartthings extends utils.Adapter {
    * Is called when databases are connected and adapter received configuration.
    */
   async onReady() {
-    // Reset the connection indicator during startup
+    // Reset the connection indicator during startup.
     this.setState('info.connection', false, true);
     const pollingInterval = normalizePollingInterval(this.config.interval);
-    if (pollingInterval !== this.config.interval) {
+    if (isPollingIntervalAdjusted(this.config.interval)) {
       this.log.warn('Invalid or too-small polling interval; applying a safe value');
     }
     this.config.interval = pollingInterval;
@@ -64,46 +70,101 @@ class Smartthings extends utils.Adapter {
     // Older adapter installations may not have all configuration keys.
     this.excludeDeviceSet = new Set(parseExclusionList(this.config.excludeDevices));
     this.excludeStateEndingsArray = parseExclusionList(this.config.exclude);
-
     this.subscribeStates('*');
 
+    // A manually configured Personal Access Token is independent of the
+    // Samsung login/refresh flow. Validate it through getDeviceList() below.
+    const configuredToken = hasAccessToken(this.config.token);
+    let authenticated = configuredToken;
+    let sessionAuthenticated = false;
     try {
       const authState = await this.getStateAsync('authInformation.session');
       const storedSession = parseStoredSession(authState && authState.val);
       if (storedSession) {
         this.session = storedSession;
         this.log.info('Use existing session to login');
-        await this.refreshToken();
+        sessionAuthenticated = await this.refreshToken();
+        authenticated = sessionAuthenticated || configuredToken;
+        if (!sessionAuthenticated && configuredToken) {
+          this.log.warn('Stored session refresh failed; checking configured token');
+        }
       } else {
         if (authState && authState.val) {
           this.log.warn('Stored SmartThings session is invalid; a new login may be required');
         }
-        await this.login();
+        if (this.config.codeUrl) {
+          sessionAuthenticated = await this.login();
+          authenticated = sessionAuthenticated || configuredToken;
+        }
       }
     } catch (error) {
       this.log.error('SmartThings authentication failed: ' + formatRequestError(error));
       return;
     }
 
-    if (this.config.token) {
-      await this.getDeviceList();
-      await this.connectSSE();
-      await this.updateDevices();
-      this.updateInterval = setInterval(async () => {
-        await this.updateDevices();
-      }, this.config.interval * 1000);
-      if (this.config.virtualInterval > 0) {
-        this.updateVirtualInterval = setInterval(async () => {
-          await this.updateDevices(true);
-        }, this.config.virtualInterval * 1000);
-      }
-      this.session.expires_in = this.session.expires_in || 86400;
-      this.refreshInterval = this.setInterval(async () => {
-        await this.refreshToken();
-      }, this.session.expires_in * 1000);
-    } else {
+    if (!authenticated || !hasAccessToken(this.config.token)) {
       this.log.info('Please enter a valid codeUrl or Samsung Smartthings Token');
+      return;
     }
+
+    // A token string alone is not proof of authorization. Verify it with
+    // SmartThings before starting polling and the SSE subscription.
+    if (!await this.getDeviceList()) {
+      this.log.warn('SmartThings device list unavailable; skipping polling and SSE');
+      this.setState('info.connection', false, true);
+      return;
+    }
+
+    await this.connectSSE();
+    await this.updateDevices();
+    this.updateInterval = setInterval(async () => {
+      await this.updateDevices();
+    }, this.config.interval * 1000);
+    if (this.config.virtualInterval > 0) {
+      this.updateVirtualInterval = setInterval(async () => {
+        await this.updateDevices(true);
+      }, this.config.virtualInterval * 1000);
+    }
+    if (sessionAuthenticated) {
+      this.scheduleTokenRefresh();
+    }
+  }
+
+  /**
+   * Re-arm a bounded one-shot token refresh after each successful renewal.
+   * Failures retry after five minutes without starting a tight auth loop.
+   * @param {number} [retryDelayMs] Override for bounded retry delays.
+   */
+  scheduleTokenRefresh(retryDelayMs) {
+    if (this.refreshInterval) {
+      clearTimeout(this.refreshInterval);
+      this.refreshInterval = null;
+    }
+    if (this.shuttingDown || !this.session.refresh_token) {
+      return;
+    }
+    const delayMs = retryDelayMs === undefined ? getTokenRefreshDelayMs(this.session.expires_in) : retryDelayMs;
+    this.refreshInterval = setTimeout(async () => {
+      this.refreshInterval = null;
+      if (this.shuttingDown) {
+        return;
+      }
+      let refreshed = false;
+      try {
+        refreshed = await this.refreshToken();
+      } catch (error) {
+        this.log.error('SmartThings token refresh failed: ' + formatRequestError(error));
+      }
+      if (this.shuttingDown) {
+        return;
+      }
+      if (refreshed) {
+        this.scheduleTokenRefresh();
+      } else {
+        this.log.warn('SmartThings token refresh failed; retrying in five minutes');
+        this.scheduleTokenRefresh(300000);
+      }
+    }, delayMs);
   }
 
   async login() {
@@ -753,6 +814,11 @@ class Smartthings extends utils.Adapter {
    * @param {() => void} callback
    */
   async onUnload(callback) {
+    this.shuttingDown = true;
+    if (this.refreshInterval) {
+      clearTimeout(this.refreshInterval);
+      this.refreshInterval = null;
+    }
     try {
       this.setState('info.connection', false, true);
       clearTimeout(this.refreshTimeout);
