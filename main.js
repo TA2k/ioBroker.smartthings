@@ -11,6 +11,7 @@ const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
 const { compactStatus } = require('./lib/compactStatus');
+const { writeDeviceStatus, StatusCoordinator } = require('./lib/sseStatus');
 const crypto = require('crypto');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
@@ -39,6 +40,15 @@ class Smartthings extends utils.Adapter {
     this.rawResponseCache = {};
     this.excludeDeviceSet = new Set();
     this.excludeStateEndingsArray = [];
+    this.sseEventSource = null;
+    this.statusCoordinator = new StatusCoordinator({
+      refresh: async (deviceId) => {
+        const device = this.deviceArray.find((item) => item.id === deviceId);
+        if (device) await this.fetchDeviceStatus(device);
+      },
+      isKnownDevice: (deviceId) => this.deviceArray.some((item) => item.id === deviceId) && !this.excludeDeviceSet.has(deviceId),
+      onError: () => this.log.error('SmartThings status refresh failed'),
+    });
   }
 
   /**
@@ -414,6 +424,12 @@ class Smartthings extends utils.Adapter {
         error.response && this.log.error(JSON.stringify(error.response.data));
       });
 
+    if (!subscriptionId) {
+      this.log.warn('SmartThings SSE subscription unavailable; keeping scheduled polling');
+      return;
+    }
+
+    if (this.sseEventSource) this.sseEventSource.close();
     const es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
       fetch: (input, init) => fetch(input, {
         ...init,
@@ -424,6 +440,7 @@ class Smartthings extends utils.Adapter {
         },
       }),
     });
+    this.sseEventSource = es;
     es.onopen = () => {
       this.log.info('Connected to SmartThings SSE endpoint.');
     };
@@ -432,34 +449,16 @@ class Smartthings extends utils.Adapter {
       this.log.error('Error with SSE connection: ' + JSON.stringify(err));
     };
 
-    es.onmessage = async (event) => {
-      this.log.debug('Received SSE event: ' + event.data);
-      try {
-        const data = JSON.parse(event.data);
-        // APK uses eventType field, not event
-        if (data.eventType === 'DEVICE_EVENT' && data.deviceEvent) {
-          const de = data.deviceEvent;
-          this.log.debug(`Device event: ${de.deviceId} ${de.capability}.${de.attribute} = ${de.value}`);
-
-          // Update state directly from SSE event (real-time update)
-          const statePath = `${de.deviceId}.status.components.main.${de.capability}.${de.attribute}.value`;
-          if (de.stateChange) {
-            await this.setStateAsync(statePath, de.value, true);
-            this.log.debug(`Updated state via SSE: ${statePath} = ${de.value}`);
-          }
-        } else if (data.eventType === 'DEVICE_HEALTH_EVENT' && data.deviceHealthEvent) {
-          const dhe = data.deviceHealthEvent;
-          this.log.debug(`Device health: ${dhe.deviceId} = ${dhe.status}`);
-        }
-      } catch (error) {
-        this.log.error('Error parsing SSE event data: ' + error);
-      }
+    // Named and unnamed DEVICE_EVENT frames use one canonical status writer.
+    // Do not write SSE payloads directly to a guessed ioBroker state path.
+    es.onmessage = (event) => {
+      this.statusCoordinator.onEvent(event.data, 'message');
     };
-
     es.addEventListener('DEVICE_EVENT', (event) => {
-      this.log.debug('Device event received via addEventListener: ' + event.data);
+      this.statusCoordinator.onEvent(event.data, 'DEVICE_EVENT');
     });
   }
+
   async refreshToken() {
     if (!this.session.refresh_token) {
       this.log.debug('No refresh_token found');
@@ -647,78 +646,46 @@ class Smartthings extends utils.Adapter {
   }
 
   async updateDevices(onlyVirtualSwitch) {
-    const statusArray = [
-      {
-        path: 'status',
-        url: 'https://api.smartthings.com/v1/devices/$id/status',
-        desc: 'Status of the device',
-      },
-    ];
-
-    const headers = {
-      'User-Agent': 'ioBroker',
-      Authorization: 'Bearer ' + this.config.token,
-    };
     for (const device of this.deviceArray) {
-      if (onlyVirtualSwitch && device.type !== 'Virtual Switch') {
-        continue;
+      if (onlyVirtualSwitch && device.type !== 'Virtual Switch') continue;
+      await this.statusCoordinator.request(device.id);
+    }
+  }
+
+  /**
+   * Fetch and persist a single device's canonical status for both polling
+   * and SSE-triggered refreshes.
+   * @param {{ id: string, type: string }} device Known device.
+   */
+  async fetchDeviceStatus(device) {
+    const url = 'https://api.smartthings.com/v1/devices/' + device.id + '/status';
+    try {
+      const res = await this.requestClient({
+        method: 'get',
+        url: url,
+        headers: {
+          'User-Agent': 'ioBroker',
+          Authorization: 'Bearer ' + this.config.token,
+        },
+      });
+      this.log.debug(JSON.stringify(res.data));
+      if (!res.data) return;
+      await writeDeviceStatus(device.id, res.data, {
+        parse: (path, data, options) => this.json2iob.parse(path, data, options),
+        cache: this.responseCache,
+        rawCache: this.rawResponseCache,
+        compactMode: this.config.compactMode,
+        compact: compactStatus,
+        excludeEndings: this.excludeStateEndingsArray,
+      });
+    } catch (error) {
+      if (error.response && error.response.status === 401) {
+        this.log.info('status receive 401 error. Please use new Token');
+        return;
       }
-      for (const element of statusArray) {
-        const url = element.url.replace('$id', device.id);
-
-        try {
-          const res = await this.requestClient({
-            method: 'get',
-            url: url,
-            headers: headers,
-          });
-
-          this.log.debug(JSON.stringify(res.data));
-          if (!res.data) {
-            continue;
-          }
-          let data = res.data;
-          let keys = Object.keys(data);
-          if (keys.length === 1) {
-            data = data[keys[0]];
-          }
-          keys = Object.keys(data);
-          if (keys.length === 1) {
-            data = data[keys[0]];
-          }
-          const forceIndex = undefined;
-          const preferedArrayName = undefined;
-
-          const cacheKey = device.id + '.' + element.path;
-          const rawData = data;
-          const previousRawData = this.rawResponseCache[cacheKey];
-          if (this.config.compactMode) {
-            data = compactStatus(data, previousRawData);
-          }
-          const previousData = this.responseCache[cacheKey];
-
-          await this.json2iob.parse(device.id + '.' + element.path, data, {
-            forceIndex: forceIndex,
-            preferedArrayName: preferedArrayName,
-            channelName: element.desc,
-            excludeStateWithEnding: this.excludeStateEndingsArray,
-            previousData: previousData,
-          });
-
-          this.rawResponseCache[cacheKey] = rawData;
-          this.responseCache[cacheKey] = data;
-        } catch (error) {
-          if (error.response && error.response.status === 401) {
-            error.response && this.log.debug(JSON.stringify(error.response.data));
-            this.log.info(element.path + ' receive 401 error. Please use new Token');
-            continue;
-          }
-
-          this.log.error(url);
-          this.log.error(error);
-          error.response && this.log.error(JSON.stringify(error.response.data));
-        }
-      }
+      this.log.error('Failed to update SmartThings status for ' + device.id);
+      this.log.error(error);
+      error.response && this.log.error(JSON.stringify(error.response.data));
     }
   }
 
@@ -728,6 +695,11 @@ class Smartthings extends utils.Adapter {
    */
   async onUnload(callback) {
     try {
+      this.statusCoordinator.close();
+      if (this.sseEventSource) {
+        this.sseEventSource.close();
+        this.sseEventSource = null;
+      }
       this.setState('info.connection', false, true);
       clearTimeout(this.refreshTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
