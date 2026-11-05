@@ -30,3 +30,35 @@ label > i[title] {
 }
 
 /* Add your styles here */
+
+/* Guided Samsung login: readable on phones and small admin windows. */
+#codeInfo {
+    max-width: 100%;
+}
+#codeInfo .login-steps li {
+    margin-bottom: 0.85rem;
+    overflow-wrap: anywhere;
+}
+#codeInfo .login-help {
+    margin: 0.8rem 0 1.2rem;
+}
+#codeInfo .login-help-image {
+    width: 100%;
+    max-width: 480px;
+    height: auto;
+}
+#codeInfo code {
+    overflow-wrap: anywhere;
+}
+#codeInfo .login-status {
+    margin: 0.9rem 0;
+}
+#codeInfo .login-status-valid {
+    color: #23753f;
+}
+#codeInfo .login-status-error {
+    color: #b3261e;
+}
+#codeInfo #callbackPaste {
+    min-height: 5rem;
+}
