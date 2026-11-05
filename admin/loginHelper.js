@@ -25,7 +25,7 @@ function extractSamsungCallback(input) {
   let parsed;
   try {
     parsed = new URL(callback);
-  } catch (error) {
+  } catch {
     return null;
   }
 
