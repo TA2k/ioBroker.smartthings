@@ -38,6 +38,13 @@ jobs:
 
       - name: Lint source code
         run: npm run lint
+      - name: Run JavaScript unit tests
+        run: npm run test:js
+      # The project's full npm run check currently fails in unchanged legacy
+      # code and because Node type definitions are missing. Check the
+      # self-contained safety helper here without masking those baseline issues.
+      - name: Check startup safety helper types
+        run: npx tsc --allowJs --checkJs --noEmit --target es2019 --module commonjs --skipLibCheck lib/startupSafety.js
       - name: Test package files
         run: npm run test:package
 
@@ -74,7 +81,9 @@ jobs:
 
       - name: Run integration tests (windows only)
         if: startsWith(runner.OS, 'windows')
-        run: set DEBUG=testing:* & npm run test:integration
+        env:
+          DEBUG: "testing:*"
+        run: npm run test:integration
 # TODO: To enable automatic npm releases, create a token on npmjs.org
 # Enter this token as a GitHub secret (with name NPM_TOKEN) in the repository options
 # Then uncomment the following block:

@@ -11,6 +11,17 @@ const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
 const { compactStatus } = require('./lib/compactStatus');
+const {
+  normalizePollingInterval,
+  normalizeVirtualInterval,
+  isPollingIntervalAdjusted,
+  getTokenRefreshDelayMs,
+  hasAccessToken,
+  mergeRefreshedSession,
+  parseExclusionList,
+  parseStoredSession,
+  formatRequestError,
+} = require('./lib/startupSafety');
 const crypto = require('crypto');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
@@ -28,6 +39,8 @@ class Smartthings extends utils.Adapter {
     this.on('unload', this.onUnload.bind(this));
     this.requestClient = axios.create();
     this.updateInterval = null;
+    this.refreshInterval = null;
+    this.shuttingDown = false;
     this.reLoginTimeout = null;
     this.json2iob = new Json2iob(this);
     this.deviceArray = [];
@@ -45,49 +58,113 @@ class Smartthings extends utils.Adapter {
    * Is called when databases are connected and adapter received configuration.
    */
   async onReady() {
-    // Reset the connection indicator during startup
+    // Reset the connection indicator during startup.
     this.setState('info.connection', false, true);
-    if (this.config.interval < 1) {
-      this.log.info('Set interval to minimum 1');
-      this.config.interval = 1;
+    const pollingInterval = normalizePollingInterval(this.config.interval);
+    if (isPollingIntervalAdjusted(this.config.interval)) {
+      this.log.warn('Invalid or too-small polling interval; applying a safe value');
     }
+    this.config.interval = pollingInterval;
+    this.config.virtualInterval = normalizeVirtualInterval(this.config.virtualInterval);
 
-    // Cache exclude lists at startup to avoid parsing on every iteration
-    this.excludeDeviceSet = new Set(
-      this.config.excludeDevices.replace(/ /g, '').split(',').filter(Boolean)
-    );
-    this.excludeStateEndingsArray = this.config.exclude.replace(/ /g, '').split(',').filter(Boolean);
-
+    // Older adapter installations may not have all configuration keys.
+    this.excludeDeviceSet = new Set(parseExclusionList(this.config.excludeDevices));
+    this.excludeStateEndingsArray = parseExclusionList(this.config.exclude);
     this.subscribeStates('*');
 
-    const authState = await this.getStateAsync('authInformation.session');
-    if (authState && authState.val) {
-      this.session = JSON.parse(authState.val);
-      this.log.info('Use existing session to login');
-      await this.refreshToken();
-    } else {
-      await this.login();
+    // A manually configured Personal Access Token is independent of the
+    // Samsung login/refresh flow. Validate it through getDeviceList() below.
+    const configuredToken = hasAccessToken(this.config.token);
+    let authenticated = configuredToken;
+    let sessionAuthenticated = false;
+    try {
+      const authState = await this.getStateAsync('authInformation.session');
+      const storedSession = parseStoredSession(authState && authState.val);
+      if (storedSession) {
+        this.session = storedSession;
+        this.log.info('Use existing session to login');
+        sessionAuthenticated = await this.refreshToken();
+        authenticated = sessionAuthenticated || configuredToken;
+        if (!sessionAuthenticated && configuredToken) {
+          this.log.warn('Stored session refresh failed; checking configured token');
+        }
+      } else {
+        if (authState && authState.val) {
+          this.log.warn('Stored SmartThings session is invalid; a new login may be required');
+        }
+        if (this.config.codeUrl) {
+          sessionAuthenticated = await this.login();
+          authenticated = sessionAuthenticated || configuredToken;
+        }
+      }
+    } catch (error) {
+      this.log.error('SmartThings authentication failed: ' + formatRequestError(error));
+      return;
     }
 
-    if (this.config.token) {
-      await this.getDeviceList();
-      await this.connectSSE();
-      await this.updateDevices();
-      this.updateInterval = setInterval(async () => {
-        await this.updateDevices();
-      }, this.config.interval * 1000);
-      if (this.config.virtualInterval > 0) {
-        this.updateVirtualInterval = setInterval(async () => {
-          await this.updateDevices(true);
-        }, this.config.virtualInterval * 1000);
-      }
-      this.session.expires_in = this.session.expires_in || 86400;
-      this.refreshInterval = this.setInterval(async () => {
-        await this.refreshToken();
-      }, this.session.expires_in * 1000);
-    } else {
+    if (!authenticated || !hasAccessToken(this.config.token)) {
       this.log.info('Please enter a valid codeUrl or Samsung Smartthings Token');
+      return;
     }
+
+    // A token string alone is not proof of authorization. Verify it with
+    // SmartThings before starting polling and the SSE subscription.
+    if (!await this.getDeviceList()) {
+      this.log.warn('SmartThings device list unavailable; skipping polling and SSE');
+      this.setState('info.connection', false, true);
+      return;
+    }
+
+    await this.connectSSE();
+    await this.updateDevices();
+    this.updateInterval = setInterval(async () => {
+      await this.updateDevices();
+    }, this.config.interval * 1000);
+    if (this.config.virtualInterval > 0) {
+      this.updateVirtualInterval = setInterval(async () => {
+        await this.updateDevices(true);
+      }, this.config.virtualInterval * 1000);
+    }
+    if (sessionAuthenticated) {
+      this.scheduleTokenRefresh();
+    }
+  }
+
+  /**
+   * Re-arm a bounded one-shot token refresh after each successful renewal.
+   * Failures retry after five minutes without starting a tight auth loop.
+   * @param {number} [retryDelayMs] Override for bounded retry delays.
+   */
+  scheduleTokenRefresh(retryDelayMs) {
+    if (this.refreshInterval) {
+      clearTimeout(this.refreshInterval);
+      this.refreshInterval = null;
+    }
+    if (this.shuttingDown || !this.session.refresh_token) {
+      return;
+    }
+    const delayMs = retryDelayMs === undefined ? getTokenRefreshDelayMs(this.session.expires_in) : retryDelayMs;
+    this.refreshInterval = setTimeout(async () => {
+      this.refreshInterval = null;
+      if (this.shuttingDown) {
+        return;
+      }
+      let refreshed = false;
+      try {
+        refreshed = await this.refreshToken();
+      } catch (error) {
+        this.log.error('SmartThings token refresh failed: ' + formatRequestError(error));
+      }
+      if (this.shuttingDown) {
+        return;
+      }
+      if (refreshed) {
+        this.scheduleTokenRefresh();
+      } else {
+        this.log.warn('SmartThings token refresh failed; retrying in five minutes');
+        this.scheduleTokenRefresh(300000);
+      }
+    }, delayMs);
   }
 
   async login() {
@@ -121,30 +198,31 @@ class Smartthings extends utils.Adapter {
     this.log.debug('Initial Login');
     if (!this.config.codeUrl) {
       this.log.error('Please enter a Samsung Smartthings Code Url in the instance settings');
-      return;
+      return false;
     }
-    const parameter = qs.parse(this.config.codeUrl.split('?')[1]);
-    if (!parameter.code) {
-      this.log.error('No Code found in the codeUrl');
-      return;
+    const parameter = qs.parse(typeof this.config.codeUrl === 'string' ? this.config.codeUrl.split('?')[1] : '');
+    if (typeof parameter.code !== 'string' || typeof parameter.retValue !== 'string' || typeof parameter.state !== 'string') {
+      this.log.error('Invalid SmartThings code URL; please enter a new callback URL');
+      return false;
     }
-    const subKey = Buffer.from(initialPayload.state.substring(0, 32), 'utf8').toString('base64');
 
-    let decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
-    decipher.setAutoPadding(true);
-    let codeDecrypted = decipher.update(Buffer.from(parameter.code, 'hex'), undefined, 'utf8');
-    codeDecrypted += decipher.final('utf8');
-    this.log.debug(codeDecrypted);
-    //reset decipher
-    decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
-    let username = decipher.update(Buffer.from(parameter.retValue, 'hex'), undefined, 'utf8');
-    username += decipher.final('utf8');
+    let codeDecrypted;
+    let username;
+    try {
+      const subKey = Buffer.from(initialPayload.state.substring(0, 32), 'utf8').subarray(0, 16);
+      const iv = Buffer.from(this.iv, 'base64');
+      const decrypt = (encrypted) => {
+        const decipher = crypto.createDecipheriv('aes-128-cbc', subKey, iv);
+        return decipher.update(Buffer.from(encrypted, 'hex'), undefined, 'utf8') + decipher.final('utf8');
+      };
+      codeDecrypted = decrypt(parameter.code);
+      username = decrypt(parameter.retValue);
+      decrypt(parameter.state);
+    } catch {
+      this.log.error('Unable to decode SmartThings code URL; please generate a new one');
+      return false;
+    }
 
-    decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(subKey, 'base64').subarray(0, 16), Buffer.from(this.iv, 'base64'));
-    let keyInformation = decipher.update(Buffer.from(parameter.state, 'hex'), undefined, 'utf8');
-    //eslint-disable-next-line
-    keyInformation += decipher.final('utf8');
-    this.log.info('Found code for user: ' + username);
     const userInfos = await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
@@ -182,17 +260,15 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
         return res.data;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
         this.log.error('Please use a new code url');
       });
     if (!userInfos || !userInfos.userauth_token) {
       this.log.error('No userauth_token found');
-      return;
+      return false;
     }
     const codeInfos = await this.requestClient({
       method: 'get',
@@ -223,14 +299,16 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
         return res.data;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
       });
-    await this.requestClient({
+    if (!codeInfos || typeof codeInfos.code !== 'string') {
+      this.log.error('SmartThings authorization did not return a code');
+      return false;
+    }
+    const loginSucceeded = await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
       url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
@@ -256,7 +334,10 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
-        this.log.debug(JSON.stringify(res.data));
+        if (!res || !res.data || !hasAccessToken(res.data.access_token)) {
+          this.log.error('SmartThings token exchange returned no usable access token');
+          return false;
+        }
         this.session = res.data;
         await this.extendObject('authInformation', {
           type: 'channel',
@@ -277,14 +358,15 @@ class Smartthings extends utils.Adapter {
           native: {},
         });
         this.log.info('Login successful.');
-        await this.setState('authInformation.session', JSON.stringify(this.session), true);
+        await this.setStateAsync('authInformation.session', JSON.stringify(this.session), true);
         this.config.token = res.data.access_token;
-        return res.data;
+        return true;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
+        return false;
       });
+    return loginSucceeded === true;
   }
 
   async connectSSE() {
@@ -410,8 +492,7 @@ class Smartthings extends utils.Adapter {
       })
       .catch((error) => {
         this.log.error('Failed to create subscription');
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.log.error(formatRequestError(error));
       });
 
     const es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
@@ -429,7 +510,7 @@ class Smartthings extends utils.Adapter {
     };
 
     es.onerror = (err) => {
-      this.log.error('Error with SSE connection: ' + JSON.stringify(err));
+      this.log.error('Error with SSE connection: ' + formatRequestError(err));
     };
 
     es.onmessage = async (event) => {
@@ -452,7 +533,7 @@ class Smartthings extends utils.Adapter {
           this.log.debug(`Device health: ${dhe.deviceId} = ${dhe.status}`);
         }
       } catch (error) {
-        this.log.error('Error parsing SSE event data: ' + error);
+        this.log.error('Error parsing SSE event data: ' + formatRequestError(error));
       }
     };
 
@@ -463,48 +544,51 @@ class Smartthings extends utils.Adapter {
   async refreshToken() {
     if (!this.session.refresh_token) {
       this.log.debug('No refresh_token found');
-      return;
+      return false;
     }
     this.log.debug('Start refresh token');
-    await this.requestClient({
-      method: 'post',
-      maxBodyLength: Infinity,
-      url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
-      headers: {
-        'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
-        'content-type': 'application/x-www-form-urlencoded',
-        'x-osp-clientversion': '3.6.2024042301',
-        accept: '*/*',
-        'x-osp-packageversion': '1.7.22',
-        'x-osp-packagename': 'com.samsung.oneconnect4ios',
-        'accept-language': 'de-DE,de;q=0.9',
-        'x-osp-clientmodel': 'iPhone',
-        'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
-        'x-osp-appid': '8931gfak30',
-        'x-osp-clientosversion': '15.8.3',
-      },
-      data: {
-        refresh_token: this.session.refresh_token,
-        client_id: '8931gfak30',
-        grant_type: 'refresh_token',
-      },
-    })
-      .then(async (res) => {
-        this.log.debug(JSON.stringify(res.data));
-        this.session = res.data;
-        await this.setState('authInformation.session', JSON.stringify(this.session), true);
-        this.config.token = res.data.access_token;
-        return res.data;
-      })
-      .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
-        this.log.error('Refresh Token failed please delete authInformation.session and enter a new code Url');
+    try {
+      const res = await this.requestClient({
+        method: 'post',
+        maxBodyLength: Infinity,
+        url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
+        headers: {
+          'x-osp-trxid': 'TZTSw.3_EeI5cyuplYNO~nCySY19hTMC',
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-osp-clientversion': '3.6.2024042301',
+          accept: '*/*',
+          'x-osp-packageversion': '1.7.22',
+          'x-osp-packagename': 'com.samsung.oneconnect4ios',
+          'accept-language': 'de-DE,de;q=0.9',
+          'x-osp-clientmodel': 'iPhone',
+          'user-agent': 'SmartThings/22 CFNetwork/1335.0.3.4 Darwin/21.6.0',
+          'x-osp-appid': '8931gfak30',
+          'x-osp-clientosversion': '15.8.3',
+        },
+        data: {
+          refresh_token: this.session.refresh_token,
+          client_id: '8931gfak30',
+          grant_type: 'refresh_token',
+        },
       });
+      const nextSession = mergeRefreshedSession(this.session, res && res.data);
+      if (!nextSession) {
+        this.log.error('SmartThings refresh response contains no usable tokens');
+        return false;
+      }
+      await this.setStateAsync('authInformation.session', JSON.stringify(nextSession), true);
+      this.session = nextSession;
+      this.config.token = nextSession.access_token;
+      return true;
+    } catch (error) {
+      this.log.error(formatRequestError(error));
+      this.log.warn('SmartThings token refresh failed; reauthorization may be required');
+      return false;
+    }
   }
 
   async getDeviceList() {
-    await this.requestClient({
+    return this.requestClient({
       method: 'get',
       url: 'https://api.smartthings.com/v1/devices',
       headers: {
@@ -513,6 +597,10 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
+        if (!res || !res.data || !Array.isArray(res.data.items)) {
+          this.log.error('SmartThings device list response is invalid');
+          return false;
+        }
         this.log.debug(JSON.stringify(res.data));
         this.setState('info.connection', true, true);
         this.log.info(res.data.items.length + ' devices detected');
@@ -632,17 +720,18 @@ class Smartthings extends utils.Adapter {
                   });
                 })
                 .catch((error) => {
-                  this.log.error(error);
-                  error.response && this.log.error(JSON.stringify(error.response.data));
+                  this.log.error(formatRequestError(error));
                 });
             });
           }
           await this.json2iob.parse(device.deviceId + '.general', device);
         }
+        return true;
       })
       .catch((error) => {
-        this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        this.setState('info.connection', false, true);
+        this.log.error(formatRequestError(error));
+        return false;
       });
   }
 
@@ -709,14 +798,12 @@ class Smartthings extends utils.Adapter {
           this.responseCache[cacheKey] = data;
         } catch (error) {
           if (error.response && error.response.status === 401) {
-            error.response && this.log.debug(JSON.stringify(error.response.data));
             this.log.info(element.path + ' receive 401 error. Please use new Token');
             continue;
           }
 
           this.log.error(url);
-          this.log.error(error);
-          error.response && this.log.error(JSON.stringify(error.response.data));
+          this.log.error(formatRequestError(error));
         }
       }
     }
@@ -727,9 +814,14 @@ class Smartthings extends utils.Adapter {
    * @param {() => void} callback
    */
   async onUnload(callback) {
+    this.shuttingDown = true;
+    if (this.refreshInterval) {
+      clearTimeout(this.refreshInterval);
+      this.refreshInterval = null;
+    }
     try {
       this.setState('info.connection', false, true);
-      clearTimeout(this.refreshTimeout);
+      this.refreshTimeout && clearTimeout(this.refreshTimeout);
       this.updateInterval && clearInterval(this.updateInterval);
       clearInterval(this.updateVirtualInterval);
       if (this.config.codeUrl) {
@@ -742,7 +834,7 @@ class Smartthings extends utils.Adapter {
 
       callback();
     } catch (e) {
-      this.log.error(e);
+      this.log.error(formatRequestError(e));
       callback();
     }
   }
@@ -783,7 +875,7 @@ class Smartthings extends utils.Adapter {
           }
         }
 
-        this.log.info(JSON.stringify(data));
+        this.log.debug('Sending SmartThings device command');
         await this.requestClient({
           method: 'post',
           url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
@@ -794,14 +886,11 @@ class Smartthings extends utils.Adapter {
           data: data,
         })
           .then((res) => {
-            this.log.info(JSON.stringify(res.data));
+            this.log.debug('SmartThings device command accepted');
             return res.data;
           })
           .catch((error) => {
-            this.log.error(error);
-            if (error.response) {
-              this.log.error(JSON.stringify(error.response.data));
-            }
+            this.log.error(formatRequestError(error));
           });
         clearTimeout(this.refreshTimeout);
         this.refreshTimeout = setTimeout(async () => {
