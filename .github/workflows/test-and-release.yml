@@ -38,6 +38,8 @@ jobs:
 
       - name: Lint source code
         run: npm run lint
+      - name: Run JavaScript unit tests
+        run: npm run test:js
       - name: Test package files
         run: npm run test:package
 

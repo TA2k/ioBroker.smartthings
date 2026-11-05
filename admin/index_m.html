@@ -14,6 +14,7 @@
     <!-- Load our own files -->
     <link rel="stylesheet" type="text/css" href="style.css" />
     <script type="text/javascript" src="words.js"></script>
+    <script type="text/javascript" src="loginHelper.js"></script>
 
     <script type="text/javascript">
       // This will be called by the admin adapter when the settings page loads
@@ -34,9 +35,35 @@
               .on('keyup', () => onChange());
           }
         });
+        initLoginGuide();
         onChange(false);
         // reinitialize all the Materialize labels on the page if you are dynamically adding inputs:
         if (M) M.updateTextFields();
+      }
+
+      function initLoginGuide() {
+        $('#applyCallback').off('click').on('click', function () {
+          var input = $('#callbackPaste').val();
+          var helper = window.smartthingsLoginHelper;
+          var callback = helper && helper.extractSamsungCallback(input);
+          var $status = $('#callbackHint');
+          if (!callback) {
+            $status.text('No complete Samsung callback found. Copy the full samsungconnect:// URL with code, retValue, and state.');
+            $status.removeClass('login-status-valid').addClass('login-status-error');
+            return;
+          }
+          $('#codeUrl').val(callback).trigger('change');
+          $('#callbackPaste').val('');
+          $status.text('Callback format verified. Save the adapter settings to start authentication; account access is not yet verified.');
+          $status.removeClass('login-status-error').addClass('login-status-valid');
+          if (typeof M !== 'undefined') M.updateTextFields();
+        });
+        $('#toggleCallback').off('click').on('click', function () {
+          var $field = $('#codeUrl');
+          var reveal = $field.attr('type') === 'password';
+          $field.attr('type', reveal ? 'text' : 'password');
+          $(this).text(reveal ? 'Hide callback' : 'Show callback').attr('aria-pressed', reveal);
+        });
       }
 
       // This will be called by the admin adapter when the user presses the save button
@@ -72,47 +99,75 @@
       <div class="row">
    
         <div class="row">
-          <div class="col s6 input-field" id="codeInfo">
-            1. Open the red Url below in Google Chrome or Firefox (NOT Edge) and login with your account until you see a white screen
-            <p></p>
-            2. Open Developer Console F12 or Option + Command + I
-            <p></p>
-            3. You see a failed redirect in the Console. Copy the blue samsungconnect:// url
-            <p></p>
-            <img src="copyurl.png" style="width: 30rem" />
-            <p></p>
-            4. Paste the url in the input field below
-  
-
-            <p></p>
-            In Safari you have to enter copy(document.body.getAttribute("onload").split("'")[1]) in the console to copy the url in the clipboard
-            <p></p>
-            <p></p>
-            <a
-              href="https://account.samsung.com/accounts/IOSSDK/signInGate?locale=de_DE&svcParam=ewogICJzdmNFbmNJViIgOiAiNzkzMDdFNDk0RjVGMkQ2RTU5Mzg1NzYyNUY0RTY4NDgiLAogICJjaGtEb051bSIgOiAiMSIsCiAgInN2Y0VuY0tZIiA6ICJZUFFlMDJNb1VRMVpvOUptUkZteUU3YjZVWHV0d3p5Qy1CRzlod09pNWpDYzMzTnpGcEdOZEZhWmoyd2pXTHltZUhtRkZDY2FqOVlybWhJbmJQZnBGS2tXZlBjVWZqbjNVZVVCa0wyeWZWVVZuRmZuUFA5b1FBRTdRbElXQUlma21GcDZ6eklQcElORVlGV2NUNzd5dFdCREtlMnZSdUxPSnR4UDg4VDBYU2siLAogICJzdmNFbmNQYXJhbSIgOiAiM2tLVU9OdkdFRWVjZjlnczRkT3lsVk9SVDBiNEV6ZE5LQVozRlZ5NW5OclM2blVFX1ZhQngySHdxcEFOUXkySkVmdURPNlRVbXM5WWtzQjlqbGtoU0J5VGpPSkxfV3JDaDhjSWx5VmhCMnZOR1FYaElNRGg0Q1FwanowV2V5dGJ4cS1NYjR6WGozNnhWZUlidklTTjRNMmUzajJySkdFUDdsRWRRSUk3QkpZNmw1UGJQMnlJNl82ZHhOZlVlT3Q1bHowXzJpUFRhYW1sX0drb00xcVFudndTR2NCZEhkc1NWQ3hEQkNxcHRlRVNxZkZ6Sl9pX2VLclFHdl9nTVo0R2xOVmVLRlA1WkluOE91UUIxdGNyUVNDZjBpM045UUEzeEdvdXpXUUdqZGszMWZkUlBoRXhPWEIxMEVvaVhtdnBkZmZVSWpsUlU0R3pNWkh6anJNTUt1M19IU0R2b09SVlZWdXg3a1NmVk05WXd1dHFIZW5KV01VWXhFVDkyaTBtSHpmZHMxWTZBYTdrR3c0QWhQMVNQR0Q1ZTh0Nm05NDkwV0VCZVMzOHpwRTFHTVN5M0RKbENFVHBPRGNjMG5MNnNVMTFGOTYwMFZBdHEyNVpDUlI5dUQ1NXpGb1ZBUUIyV0RDaE92RzZUTDFlLWhYdElVZ21aZTdOTE5BWlpIMjA1d2RJVnU2YlFHZnd4ZmNXdktFVjdKRUdFazg2ZnJZNHdOZ3FNaDRaZ2dDeUlzZ2t1RGpnS3ZIbnFyTDFHcXFTOUUwbkU3bl9JUFM4eFJlRDAzLWdhOXc2b2ROTXdsUS1hLXdSeDJZb2dQeEpJdjdITVJHQUVmZ3FNaDdhRnpJUWowY09rV0s0QVVQTWllTWhybVZsTkV1X0s5RzdPalRpTDJrN3J3eFlPaFlwV0F5T0p4RW1XVnV6cFhWcVhEUkFZWFNnLXhDU3JOTDB1Sm5rYm1KLUdNLTFPQ0M4QVAzWEI0RmxoMzNBZEx5Y1dfM3JLRHlwY2R4WFJQRGlIWEJCanhfSXJPQ3h2bmttTm43UmhvejJQZFpTQVFGQ0FzVnZDQjlOOVJOZjFvYjJZT3g0UXVtLURlOEtxVmFDZW14dGVoVFFkeTJjSmc5S2VVZmt3cDJacUxJdlhYbkxkaVF0V18zVlNINW9GZmRzSmxENUN2bVd0S0phTmV5elFEQUJjX0xrMmJNUm94WWVheFhlQUk3NllzNEVFUUk4VDNLeGFMT3h4VWdWblVtSUJiTkI1THVWNG1ma3NnQWFmYVk1Uk5nR1NXR0liNUlsTHlhdUwxOHBjTWU2SXEzamNzVzJ6VDdXSk1EYzcwVG5hOXlaLUxsczhTZ1lyRFVjODBWdDk3c2FDVDBNTXB4MVlyNmJyWnNWUHgyR2RCUVF6eVdxSFhybmRBeHVIT1hLN1VtV0ZlQ0RXbVdPSk5lendPdjRiUnJxV2VobmtYSHZ4UGhBbmNsT1NKWlUwUlFiSjkybzBsaVY2d1dSUnZ1dlpJUlQ5UzVZN2pPWjFkNnlWVzk0MEdZOGh2cFd1S1B1V2ExTTJkR3g1NHp6LXpFMmdWZHFEYjlhbVpqYnJZclVycUZqdUhoVVJEZFduVGNMd2dGejM3alVDVnhsbzVCWU8yOENJRkQ1Z0R1ekM2a2VoV2VUd05sSVdfV0ktbFFmdHRvR1kzdUpWVWdDVEcwS012eUxUbmdVaUZYUzhuNTdRcGliXzktZXc1eHZmM29MM0plRFlEbTZzSjdrQTRFIgp9"
-              target="_blank"
-              style="color: red !important"
-              >Smartthing Login Url CLICK HERE</a
-            >
-            <p></p>
-            <input
-              type="text"
-              class="value"
-              id="codeUrl"
-              placeholder="samsungconnect://samsungaccount/callback?action=authorize&code=8ff856dc8806....."
-            />
-            <label for="codeUrl" class="translate"> samsungconnect Url</label>
+          <div class="col s12 m10 l8" id="codeInfo">
+            <h5>Connect your Samsung account</h5>
+            <p>
+              This adapter currently uses a Samsung app callback. It cannot yet finish sign-in
+              automatically inside ioBroker; the steps below guide you through the existing flow.
+              Your callback contains temporary authorization data. Do not share it in screenshots,
+              support tickets, or logs.
+            </p>
+            <ol class="login-steps">
+              <li>
+                <a href="https://account.samsung.com/accounts/IOSSDK/signInGate?locale=de_DE&svcParam=ewogICJzdmNFbmNJViIgOiAiNzkzMDdFNDk0RjVGMkQ2RTU5Mzg1NzYyNUY0RTY4NDgiLAogICJjaGtEb051bSIgOiAiMSIsCiAgInN2Y0VuY0tZIiA6ICJZUFFlMDJNb1VRMVpvOUptUkZteUU3YjZVWHV0d3p5Qy1CRzlod09pNWpDYzMzTnpGcEdOZEZhWmoyd2pXTHltZUhtRkZDY2FqOVlybWhJbmJQZnBGS2tXZlBjVWZqbjNVZVVCa0wyeWZWVVZuRmZuUFA5b1FBRTdRbElXQUlma21GcDZ6eklQcElORVlGV2NUNzd5dFdCREtlMnZSdUxPSnR4UDg4VDBYU2siLAogICJzdmNFbmNQYXJhbSIgOiAiM2tLVU9OdkdFRWVjZjlnczRkT3lsVk9SVDBiNEV6ZE5LQVozRlZ5NW5OclM2blVFX1ZhQngySHdxcEFOUXkySkVmdURPNlRVbXM5WWtzQjlqbGtoU0J5VGpPSkxfV3JDaDhjSWx5VmhCMnZOR1FYaElNRGg0Q1FwanowV2V5dGJ4cS1NYjR6WGozNnhWZUlidklTTjRNMmUzajJySkdFUDdsRWRRSUk3QkpZNmw1UGJQMnlJNl82ZHhOZlVlT3Q1bHowXzJpUFRhYW1sX0drb00xcVFudndTR2NCZEhkc1NWQ3hEQkNxcHRlRVNxZkZ6Sl9pX2VLclFHdl9nTVo0R2xOVmVLRlA1WkluOE91UUIxdGNyUVNDZjBpM045UUEzeEdvdXpXUUdqZGszMWZkUlBoRXhPWEIxMEVvaVhtdnBkZmZVSWpsUlU0R3pNWkh6anJNTUt1M19IU0R2b09SVlZWdXg3a1NmVk05WXd1dHFIZW5KV01VWXhFVDkyaTBtSHpmZHMxWTZBYTdrR3c0QWhQMVNQR0Q1ZTh0Nm05NDkwV0VCZVMzOHpwRTFHTVN5M0RKbENFVHBPRGNjMG5MNnNVMTFGOTYwMFZBdHEyNVpDUlI5dUQ1NXpGb1ZBUUIyV0RDaE92RzZUTDFlLWhYdElVZ21aZTdOTE5BWlpIMjA1d2RJVnU2YlFHZnd4ZmNXdktFVjdKRUdFazg2ZnJZNHdOZ3FNaDRaZ2dDeUlzZ2t1RGpnS3ZIbnFyTDFHcXFTOUUwbkU3bl9JUFM4eFJlRDAzLWdhOXc2b2ROTXdsUS1hLXdSeDJZb2dQeEpJdjdITVJHQUVmZ3FNaDdhRnpJUWowY09rV0s0QVVQTWllTWhybVZsTkV1X0s5RzdPalRpTDJrN3J3eFlPaFlwV0F5T0p4RW1XVnV6cFhWcVhEUkFZWFNnLXhDU3JOTDB1Sm5rYm1KLUdNLTFPQ0M4QVAzWEI0RmxoMzNBZEx5Y1dfM3JLRHlwY2R4WFJQRGlIWEJCanhfSXJPQ3h2bmttTm43UmhvejJQZFpTQVFGQ0FzVnZDQjlOOVJOZjFvYjJZT3g0UXVtLURlOEtxVmFDZW14dGVoVFFkeTJjSmc5S2VVZmt3cDJacUxJdlhYbkxkaVF0V18zVlNINW9GZmRzSmxENUN2bVd0S0phTmV5elFEQUJjX0xrMmJNUm94WWVheFhlQUk3NllzNEVFUUk4VDNLeGFMT3h4VWdWblVtSUJiTkI1THVWNG1ma3NnQWFmYVk1Uk5nR1NXR0liNUlsTHlhdUwxOHBjTWU2SXEzamNzVzJ6VDdXSk1EYzcwVG5hOXlaLUxsczhTZ1lyRFVjODBWdDk3c2FDVDBNTXB4MVlyNmJyWnNWUHgyR2RCUVF6eVdxSFhybmRBeHVIT1hLN1VtV0ZlQ0RXbVdPSk5lendPdjRiUnJxV2VobmtYSHZ4UGhBbmNsT1NKWlUwUlFiSjkybzBsaVY2d1dSUnZ1dlpJUlQ5UzVZN2pPWjFkNnlWVzk0MEdZOGh2cFd1S1B1V2ExTTJkR3g1NHp6LXpFMmdWZHFEYjlhbVpqYnJZclVycUZqdUhoVVJEZFduVGNMd2dGejM3alVDVnhsbzVCWU8yOENJRkQ1Z0R1ekM2a2VoV2VUd05sSVdfV0ktbFFmdHRvR1kzdUpWVWdDVEcwS012eUxUbmdVaUZYUzhuNTdRcGliXzktZXc1eHZmM29MM0plRFlEbTZzSjdrQTRFIgp9" target="_blank" rel="noopener noreferrer">
+                  Open Samsung sign-in in a new tab
+                </a>
+                and complete authentication.
+              </li>
+              <li>
+                On a desktop browser, open the developer console (F12 or Option + Command + I).
+                If Samsung shows a blank page or an unregistered <code>samsungconnect://</code> redirect,
+                copy the <strong>complete callback URL</strong> from the failed redirect.
+              </li>
+              <li>
+                Paste the callback URL, or the console line containing it, into the field below.
+                Select <strong>Validate and use callback</strong>, then save the instance settings.
+              </li>
+            </ol>
+            <details class="login-help">
+              <summary>Browser-specific help (Chrome, Firefox, Safari)</summary>
+              <p>
+                Chrome / Firefox: copy the link address from the failed redirect in the developer console.
+                Do not copy only its visible, truncated portion.
+              </p>
+              <img src="copyurl.png" alt="Copy the failed Samsung redirect link from the browser developer console" class="login-help-image" />
+              <p>
+                Safari: on the Samsung response page, the existing workaround is to use the developer console:
+                <code>copy(document.body.getAttribute("onload").split("'")[1])</code>.
+                This only works when Samsung returns the expected page structure.
+              </p>
+              <p>
+                Mobile browsers generally cannot expose the necessary developer tools. Use a desktop
+                browser for this legacy login flow. A true one-click login would require a separately
+                registered SmartThings OAuth application and a callback service.
+              </p>
+            </details>
+            <div class="input-field">
+              <textarea id="callbackPaste" class="materialize-textarea" autocomplete="off" spellcheck="false"></textarea>
+              <label for="callbackPaste">Paste Samsung callback or developer console line</label>
+            </div>
+            <button id="applyCallback" type="button" class="btn waves-effect waves-light">Validate and use callback</button>
+            <p id="callbackHint" role="status" aria-live="polite" class="login-status">
+              The callback is processed locally in your browser and is not sent to any external helper service.
+            </p>
+            <div class="input-field">
+              <input type="password" class="value" id="codeUrl" autocomplete="off" spellcheck="false"
+                placeholder="samsungconnect://samsungaccount/callback?..." />
+              <label for="codeUrl">Samsung callback URL (saved adapter setting)</label>
+            </div>
+            <button id="toggleCallback" type="button" class="btn-flat" aria-controls="codeUrl"
+              aria-pressed="false">Show callback</button>
           </div>
         </div>
       <div class="row">
         <div class="col s12 input-field">
-          <div class="col s12 translate">DEPREACATED: Old Smarthings Token only 24h usable please use login method.</div>
+          <div class="col s12 translate">Optional legacy Personal Access Token (typically valid for 24 hours). Use the Samsung login flow for ongoing access.</div>
         </div>
       </div>
       <div class="row">
         <div class="col s12 input-field">
-          <input type="text" class="value" id="token" />
-          <label for="token" class="translate">Smarthings Token</label>
+          <input type="password" class="value" id="token" autocomplete="off" spellcheck="false" />
+          <label for="token" class="translate">SmartThings token (optional)</label>
         </div>
       </div>
 
