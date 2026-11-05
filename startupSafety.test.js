@@ -70,6 +70,8 @@ describe('startupSafety', () => {
         .to.equal('Request failed (ECONNRESET)');
       expect(formatRequestError({ message: 'secret' }))
         .to.equal('Request failed (details omitted)');
+      expect(formatRequestError({ code: 'SECRET_TOKEN' }))
+        .to.equal('Request failed (details omitted)');
       expect(formatRequestError('Bearer secret-token'))
         .to.equal('Request failed (details omitted)');
     });
