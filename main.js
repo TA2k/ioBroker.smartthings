@@ -137,12 +137,12 @@ class Smartthings extends utils.Adapter {
     this.log.debug('Initial Login');
     if (!this.config.codeUrl) {
       this.log.error('Please enter a Samsung Smartthings Code Url in the instance settings');
-      return;
+      return false;
     }
     const parameter = qs.parse(typeof this.config.codeUrl === 'string' ? this.config.codeUrl.split('?')[1] : '');
     if (typeof parameter.code !== 'string' || typeof parameter.retValue !== 'string' || typeof parameter.state !== 'string') {
       this.log.error('Invalid SmartThings code URL; please enter a new callback URL');
-      return;
+      return false;
     }
 
     let codeDecrypted;
@@ -159,7 +159,7 @@ class Smartthings extends utils.Adapter {
       decrypt(parameter.state);
     } catch {
       this.log.error('Unable to decode SmartThings code URL; please generate a new one');
-      return;
+      return false;
     }
 
     const userInfos = await this.requestClient({
@@ -207,7 +207,7 @@ class Smartthings extends utils.Adapter {
       });
     if (!userInfos || !userInfos.userauth_token) {
       this.log.error('No userauth_token found');
-      return;
+      return false;
     }
     const codeInfos = await this.requestClient({
       method: 'get',
@@ -245,9 +245,9 @@ class Smartthings extends utils.Adapter {
       });
     if (!codeInfos || typeof codeInfos.code !== 'string') {
       this.log.error('SmartThings authorization did not return a code');
-      return;
+      return false;
     }
-    await this.requestClient({
+    const loginSucceeded = await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
       url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
@@ -273,6 +273,10 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
+        if (!res || !res.data || !hasAccessToken(res.data.access_token)) {
+          this.log.error('SmartThings token exchange returned no usable access token');
+          return false;
+        }
         this.session = res.data;
         await this.extendObject('authInformation', {
           type: 'channel',
@@ -293,13 +297,15 @@ class Smartthings extends utils.Adapter {
           native: {},
         });
         this.log.info('Login successful.');
-        await this.setState('authInformation.session', JSON.stringify(this.session), true);
+        await this.setStateAsync('authInformation.session', JSON.stringify(this.session), true);
         this.config.token = res.data.access_token;
-        return res.data;
+        return true;
       })
       .catch((error) => {
         this.log.error(formatRequestError(error));
+        return false;
       });
+    return loginSucceeded === true;
   }
 
   async connectSSE() {
