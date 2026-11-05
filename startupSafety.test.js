@@ -4,6 +4,11 @@ const { expect } = require('chai');
 const {
   normalizePollingInterval,
   normalizeVirtualInterval,
+  isPollingIntervalAdjusted,
+  normalizeSessionExpiry,
+  getTokenRefreshDelayMs,
+  hasAccessToken,
+  mergeRefreshedSession,
   parseExclusionList,
   parseStoredSession,
   formatRequestError,
@@ -36,11 +41,60 @@ describe('startupSafety', () => {
     });
   });
 
+  describe('refresh scheduling', () => {
+    it('uses a one-day fallback for invalid expiry values', () => {
+      for (const value of [undefined, null, '', '0', -5, 'invalid', NaN, Infinity, 0]) {
+        expect(normalizeSessionExpiry(value)).to.equal(86400);
+      }
+    });
+
+    it('bounds short and extremely long sessions to valid Node.js timers', () => {
+      const maxSeconds = Math.floor((2 ** 31 - 1) / 1000);
+      expect(normalizeSessionExpiry('60')).to.equal(60);
+      expect(normalizeSessionExpiry(10)).to.equal(60);
+      expect(normalizeSessionExpiry(1e20)).to.equal(maxSeconds);
+      expect(getTokenRefreshDelayMs('60')).to.equal(30000);
+      expect(getTokenRefreshDelayMs(300)).to.equal(150000);
+      expect(getTokenRefreshDelayMs(86400)).to.equal(86100000);
+      expect(getTokenRefreshDelayMs(1e20)).to.be.at.most(2 ** 31 - 1);
+    });
+
+    it('does not warn about a valid numeric string interval', () => {
+      expect(isPollingIntervalAdjusted('30')).to.equal(false);
+      expect(isPollingIntervalAdjusted(30)).to.equal(false);
+      expect(isPollingIntervalAdjusted('0')).to.equal(true);
+      expect(isPollingIntervalAdjusted('invalid')).to.equal(true);
+      expect(isPollingIntervalAdjusted(1e20)).to.equal(true);
+    });
+
+    it('rejects invalid access-token responses', () => {
+      expect(hasAccessToken('real-access-token')).to.equal(true);
+      for (const value of [undefined, null, '', ' ', 15, {}]) {
+        expect(hasAccessToken(value)).to.equal(false);
+      }
+      expect(mergeRefreshedSession({ refresh_token: 'old' }, { access_token: '' })).to.equal(null);
+    });
+
+    it('retains the previous refresh token when one is not rotated', () => {
+      const original = { refresh_token: 'old-refresh', access_token: 'old-access', expires_in: 900 };
+      const renewed = mergeRefreshedSession(original, { access_token: 'new-access', expires_in: '3600' });
+      expect(renewed).to.deep.equal({
+        refresh_token: 'old-refresh',
+        access_token: 'new-access',
+        expires_in: '3600',
+      });
+      expect(original.refresh_token).to.equal('old-refresh');
+      expect(mergeRefreshedSession(original, { access_token: 'next', refresh_token: 'rotated' }).refresh_token).to.equal('rotated');
+      expect(mergeRefreshedSession(original, { error: '401', refresh_token: 'bad' })).to.equal(null);
+    });
+  });
+
   describe('legacy configuration', () => {
     it('accepts missing exclusion entries without throwing', () => {
       expect(parseExclusionList(undefined)).to.deep.equal([]);
       expect(parseExclusionList(null)).to.deep.equal([]);
       expect(parseExclusionList('  a, b ,, c  ')).to.deep.equal(['a', 'b', 'c']);
+      expect(parseExclusionList('  a b, c d  ')).to.deep.equal(['ab', 'cd']);
     });
 
     it('only restores structurally valid stored sessions', () => {
