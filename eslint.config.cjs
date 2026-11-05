@@ -12,7 +12,9 @@ const compat = new FlatCompat({
 });
 
 module.exports = [{
-  ignores: ['**/.eslintrc.js'],
+  // ioBroker JavaScript adapter examples are executed inside a separate script runtime
+  // with adapter globals and an independent formatting convention.
+  ignores: ['**/.eslintrc.js', 'examples/**'],
 }, ...compat.extends('eslint:recommended'), {
   plugins: {},
 
@@ -22,7 +24,7 @@ module.exports = [{
       ...globals.mocha,
     },
 
-    ecmaVersion: 2018,
+    ecmaVersion: 2019,
     sourceType: 'commonjs',
   },
 
