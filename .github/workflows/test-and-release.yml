@@ -5,12 +5,14 @@ name: Test and Release
 on:
   push:
     branches:
-      - "*"
+      - "**"
     tags:
       # normal versions
       - "v[0-9]+.[0-9]+.[0-9]+"
       # pre-releases
       - "v[0-9]+.[0-9]+.[0-9]+-**"
+      # integration candidate tags such as beta1-rc2
+      - "beta[0-9]+-rc[0-9]+"
   pull_request: {}
 
 jobs:
@@ -26,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
 
@@ -62,10 +64,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
 
@@ -105,10 +107,10 @@ jobs:
 #
 #        steps:
 #            - name: Checkout code
-#              uses: actions/checkout@v2
+#              uses: actions/checkout@v4
 #
 #            - name: Use Node.js ${{ matrix.node-version }}
-#              uses: actions/setup-node@v1
+#              uses: actions/setup-node@v4
 #              with:
 #                  node-version: ${{ matrix.node-version }}
 #
