@@ -32,4 +32,8 @@ function filterDevices(devices, query) {
 
 const smartthingsDeviceSelection = { parseExcludedDevices, mergeExcludedDevices, filterDevices };
 if (typeof module !== 'undefined' && module.exports) module.exports = smartthingsDeviceSelection;
-if (typeof window !== 'undefined') window.smartthingsDeviceSelection = smartthingsDeviceSelection;
+if (typeof window !== 'undefined') {
+  /** @type {Window & { smartthingsDeviceSelection?: typeof smartthingsDeviceSelection }} */
+  const browserWindow = window;
+  browserWindow.smartthingsDeviceSelection = smartthingsDeviceSelection;
+}

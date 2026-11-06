@@ -438,6 +438,7 @@ describe('SmartThings authentication lifecycle', () => {
 
   it('aborts in-flight status requests and suppresses writes after shutdown', async () => {
     const adapter = createAdapter({ config: { token: 'access-token' } });
+    /** @type {AbortSignal | undefined} */
     let requestSignal;
     /** @type {(value: unknown) => void} */
     let resolveRequest = () => {};
@@ -450,6 +451,7 @@ describe('SmartThings authentication lifecycle', () => {
     const statusRequest = adapter.fetchDeviceStatus({ id: 'device-a', type: 'Switch' });
     await Promise.resolve();
     await adapter.onUnload(() => {});
+    if (!requestSignal) throw new Error('expected request signal to be captured');
     assert.equal(requestSignal.aborted, true);
     resolveRequest({ data: { components: { main: { switch: {} } } } });
     await statusRequest;

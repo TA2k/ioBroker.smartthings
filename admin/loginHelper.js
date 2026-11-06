@@ -72,5 +72,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = smartthingsLoginHelper;
 }
 if (typeof window !== 'undefined') {
-  window.smartthingsLoginHelper = smartthingsLoginHelper;
+  /** @type {Window & { smartthingsLoginHelper?: typeof smartthingsLoginHelper }} */
+  const browserWindow = window;
+  browserWindow.smartthingsLoginHelper = smartthingsLoginHelper;
 }

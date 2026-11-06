@@ -148,11 +148,12 @@ describe('SSE canonical status updates', () => {
   it('queues a trailing refresh when an event arrives during periodic polling', async () => {
     const clock = fakeClock();
     const calls = [];
+    /** @type {(() => void) | undefined} */
     let resolveFirst;
     const coordinator = new StatusCoordinator({
       refresh: (id) => {
         calls.push(id);
-        return calls.length === 1 ? new Promise((resolve) => { resolveFirst = resolve; }) : Promise.resolve();
+        return calls.length === 1 ? new Promise((resolve) => { resolveFirst = () => resolve(undefined); }) : Promise.resolve();
       },
       isKnownDevice: () => true,
       schedule: clock.schedule, cancel: clock.cancel,
@@ -162,6 +163,7 @@ describe('SSE canonical status updates', () => {
     coordinator.onEvent('{"eventType":"DEVICE_EVENT","deviceEvent":{"deviceId":"dev-a","stateChange":true}}', 'message');
     await clock.flush();
     assert.equal(calls.length, 1);
+    if (!resolveFirst) throw new Error('expected the first refresh to be pending');
     resolveFirst();
     await initial;
     await new Promise((resolve) => setImmediate(resolve));
