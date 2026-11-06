@@ -217,6 +217,10 @@ describe('SmartThings authentication lifecycle', () => {
 
   it('stops retrying and marks the connection offline after a terminal refresh failure', async () => {
     const adapter = createAdapter({ config: { token: 'expired-access-token' } });
+    // RC3 admits only discovered and registered command states.
+    adapter.commandStateIds.set('device.capabilities.switch-on', {
+      deviceId: 'device', capability: 'switch', command: 'on',
+    });
     adapter.session = { refresh_token: 'expired-refresh', expires_in: 60 };
     adapter.requestClient = async () => {
       throw createHttpError(401, { error: 'invalid_grant', access_token: 'private-token' });
@@ -597,6 +601,10 @@ describe('SmartThings authentication lifecycle', () => {
 
   it('does not schedule a status refresh when a command completes after shutdown', async () => {
     const adapter = createAdapter({ config: { token: 'access-token' } });
+    // RC3 admits only discovered and registered command states.
+    adapter.commandStateIds.set('device.capabilities.switch-on', {
+      deviceId: 'device', capability: 'switch', command: 'on',
+    });
     /** @type {AbortSignal | undefined} */
     let requestSignal;
     /** @type {(() => void) | undefined} */
@@ -857,6 +865,10 @@ describe('SmartThings authentication lifecycle', () => {
 
   it('marks authorization invalid and avoids follow-up polling after a command receives 401', async () => {
     const adapter = createAdapter({ config: { token: 'expired-token' } });
+    // RC3 admits only discovered and registered command states.
+    adapter.commandStateIds.set('device.capabilities.switch-on', {
+      deviceId: 'device', capability: 'switch', command: 'on',
+    });
     adapter.requestClient = async () => {
       throw createHttpError(401, { token: 'private-token' });
     };
@@ -869,6 +881,10 @@ describe('SmartThings authentication lifecycle', () => {
 
   it('uses one immediate refresh to recover from an API 401 when a session exists', async () => {
     const adapter = createAdapter({ config: { token: 'expired-access' } });
+    // RC3 admits only discovered and registered command states.
+    adapter.commandStateIds.set('device.capabilities.switch-on', {
+      deviceId: 'device', capability: 'switch', command: 'on',
+    });
     adapter.session = { refresh_token: 'valid-refresh', expires_in: 3600 };
     let calls = 0;
     adapter.requestClient = async () => {
