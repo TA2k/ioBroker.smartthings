@@ -31,6 +31,7 @@ class Smartthings extends utils.Adapter {
     this.reLoginTimeout = null;
     this.json2iob = new Json2iob(this);
     this.deviceArray = [];
+    this.commandStateIds = new Map();
     this.session = {};
     this.ocfDeviceFactory = new OcfDeviceFactory();
     this.session = {};
@@ -516,6 +517,7 @@ class Smartthings extends utils.Adapter {
         this.log.debug(JSON.stringify(res.data));
         this.setState('info.connection', true, true);
         this.log.info(res.data.items.length + ' devices detected');
+        this.commandStateIds.clear();
         for (const device of res.data.items) {
           if (!this.locationIds.includes(device.locationId)) {
             this.locationIds.push(device.locationId);
@@ -549,7 +551,7 @@ class Smartthings extends utils.Adapter {
 
           // const remoteArray = [];
           if (device.components && device.components[0] && device.components[0].capabilities) {
-            device.components[0].capabilities.forEach(async (capability) => {
+            for (const capability of device.components[0].capabilities) {
               await this.requestClient({
                 method: 'get',
                 url: 'https://api.smartthings.com/v1/capabilities/' + capability.id + '/' + capability.version,
@@ -561,7 +563,7 @@ class Smartthings extends utils.Adapter {
                 .then(async (res) => {
                   this.log.debug(JSON.stringify(res.data));
                   const idName = res.data.id;
-                  Object.keys(res.data.commands).forEach(async (element) => {
+                  for (const element of Object.keys(res.data.commands)) {
                     const common = {
                       name: '',
                       type: 'boolean',
@@ -578,6 +580,8 @@ class Smartthings extends utils.Adapter {
                         const ocfDeviceCommands = ocfDevice.getOcfCommands();
                         for (const ocfDeviceCommandName in ocfDeviceCommands) {
                           const ocfDeviceCommand = ocfDeviceCommands[ocfDeviceCommandName];
+                          const relativeId =
+                            device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName;
 
                           const objectRaw = {
                             type: 'state',
@@ -600,42 +604,52 @@ class Smartthings extends utils.Adapter {
                               commandName: ocfDeviceCommandName,
                             },
                           };
-                          await this.setObjectNotExistsAsync(
-                            device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName,
-                            objectRaw,
-                          );
+                          await this.setObjectNotExistsAsync(relativeId, objectRaw);
+                          this.commandStateIds.set(relativeId, {
+                            deviceId: device.deviceId,
+                            capability: 'ocf',
+                            command: 'postOcfCommand.' + ocfDeviceCommandName,
+                          });
                         }
                         commandCreated = true;
                       }
                     }
 
                     if (!commandCreated) {
-                      if (res.data.commands[element].arguments[0]) {
-                        common.type = res.data.commands[element].arguments[0].schema.type;
+                      const firstArgument =
+                        res.data.commands[element].arguments && res.data.commands[element].arguments[0];
+                      if (firstArgument) {
+                        common.type = firstArgument.schema.type;
                         if (common.type === 'integer') {
                           common.type = 'number';
                         }
                         common.role = 'state';
-                        if (res.data.commands[element].arguments[0].schema.enum) {
+                        if (firstArgument.schema.enum) {
                           common.states = {};
-                          res.data.commands[element].arguments[0].schema.enum.forEach((enumElement) => {
+                          firstArgument.schema.enum.forEach((enumElement) => {
                             common.states[enumElement] = enumElement;
                           });
                         }
                       }
-                      await this.setObjectNotExistsAsync(device.deviceId + '.capabilities.' + letsubIdName, {
+                      const relativeId = device.deviceId + '.capabilities.' + letsubIdName;
+                      await this.setObjectNotExistsAsync(relativeId, {
                         type: 'state',
                         common: common,
                         native: {},
                       });
+                      this.commandStateIds.set(relativeId, {
+                        deviceId: device.deviceId,
+                        capability: idName,
+                        command: element,
+                      });
                     }
-                  });
+                  }
                 })
                 .catch((error) => {
                   this.log.error(error);
                   error.response && this.log.error(JSON.stringify(error.response.data));
                 });
-            });
+            }
           }
           await this.json2iob.parse(device.deviceId + '.general', device);
         }
@@ -703,6 +717,8 @@ class Smartthings extends utils.Adapter {
             channelName: element.desc,
             excludeStateWithEnding: this.excludeStateEndingsArray,
             previousData: previousData,
+            // Status values are feedback only and must never be writable controls.
+            write: false,
           });
 
           this.rawResponseCache[cacheKey] = rawData;
@@ -753,62 +769,70 @@ class Smartthings extends utils.Adapter {
    * @param {ioBroker.State | null | undefined} state
    */
   async onStateChange(id, state) {
-    if (state) {
-      if (!state.ack) {
-        const idArray = id.split('.');
-        const deviceId = idArray[2];
-        idArray.splice(0, 4);
-        let capadId = idArray.join('.');
-        const commandId = capadId.split('-')[1];
-        capadId = capadId.split('-')[0];
+    if (!state || state.ack) {
+      return;
+    }
+    if (typeof id !== 'string' || !id.startsWith(this.namespace + '.')) {
+      return;
+    }
+    const relativeId = id.slice(this.namespace.length + 1);
+    const idParts = relativeId.split('.');
+    // Status, general and info channels are feedback, never control commands.
+    if (idParts.length < 3 || idParts[1] !== 'capabilities') {
+      return;
+    }
+    // Only states created from a discovered capability command may reach the API.
+    const commandInfo = this.commandStateIds.get(relativeId);
+    if (!commandInfo) {
+      return;
+    }
+    const deviceId = commandInfo.deviceId;
 
-        let data = { commands: [{ capability: capadId, command: commandId }] };
-        if (typeof state.val !== 'boolean') {
-          data.commands[0].arguments = [state.val];
+    let data = { commands: [{ capability: commandInfo.capability, command: commandInfo.command }] };
+    if (typeof state.val !== 'boolean') {
+      data.commands[0].arguments = [state.val];
+    }
+
+    if (commandInfo.capability === 'ocf' && commandInfo.command.startsWith('postOcfCommand')) {
+      const commandObject = await this.getForeignObjectAsync(id).then((result) => result);
+      if (commandObject) {
+        const candidate = this.ocfDeviceFactory.getOcfCommandData(
+          commandObject.native.deviceManufacturerCode,
+          commandObject.native.presentationId,
+          commandObject.native.deviceId,
+          commandObject.native.commandName,
+          state.val,
+        );
+        if (candidate !== null) {
+          data = candidate;
         }
-
-        if (capadId === 'ocf' && commandId.startsWith('postOcfCommand')) {
-          const commandObject = await this.getForeignObjectAsync(id).then((result) => result);
-          if (commandObject) {
-            const candidate = this.ocfDeviceFactory.getOcfCommandData(
-              commandObject.native.deviceManufacturerCode,
-              commandObject.native.presentationId,
-              commandObject.native.deviceId,
-              commandObject.native.commandName,
-              state.val,
-            );
-            if (candidate !== null) {
-              data = candidate;
-            }
-          }
-        }
-
-        this.log.info(JSON.stringify(data));
-        await this.requestClient({
-          method: 'post',
-          url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
-          headers: {
-            'User-Agent': 'ioBroker',
-            Authorization: 'Bearer ' + this.config.token,
-          },
-          data: data,
-        })
-          .then((res) => {
-            this.log.info(JSON.stringify(res.data));
-            return res.data;
-          })
-          .catch((error) => {
-            this.log.error(error);
-            if (error.response) {
-              this.log.error(JSON.stringify(error.response.data));
-            }
-          });
-        clearTimeout(this.refreshTimeout);
-        this.refreshTimeout = setTimeout(async () => {
-          await this.updateDevices();
-        }, 10 * 1000);
       }
     }
+
+    this.log.info(JSON.stringify(data));
+    await this.requestClient({
+      method: 'post',
+      url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
+      headers: {
+        'User-Agent': 'ioBroker',
+        Authorization: 'Bearer ' + this.config.token,
+      },
+      data: data,
+    })
+      .then((res) => {
+        this.log.info(JSON.stringify(res.data));
+        return res.data;
+      })
+      .catch((error) => {
+        this.log.error(error);
+        if (error.response) {
+          this.log.error(JSON.stringify(error.response.data));
+        }
+      });
+    clearTimeout(this.refreshTimeout);
+    this.refreshTimeout = setTimeout(async () => {
+      await this.updateDevices();
+    }, 10 * 1000);
   }
 }
 
