@@ -61,6 +61,7 @@ class Smartthings extends utils.Adapter {
     this.lastAuthFailureTerminal = false;
     this.lastAuthFailureType = 'unknown';
     this.authorizationInvalid = false;
+    this.tokenGeneration = 0;
     this.reLoginTimeout = null;
     this.writeGuardedAdapter = createWriteGuardedAdapter(this, () => !this.shuttingDown);
     this.json2iob = new Json2iob(this.writeGuardedAdapter);
@@ -187,6 +188,33 @@ class Smartthings extends utils.Adapter {
   markAuthorizationUnavailable() {
     this.authorizationInvalid = true;
     this.setState('info.connection', false, true);
+  }
+
+  /**
+   * Replace the access token and advance its generation only when the value
+   * actually changes. Requests bind to the generation active at dispatch.
+   * @param {string} accessToken Access token used by subsequent API requests.
+   */
+  setAccessToken(accessToken) {
+    if (this.config.token !== accessToken) {
+      this.tokenGeneration += 1;
+    }
+    this.config.token = accessToken;
+  }
+
+  /**
+   * A 401 is stale for auth recovery when its request was dispatched before
+   * the current access token replaced the token that request used.
+   * @param {any} error Request failure.
+   * @returns {boolean} Whether this 401 must not trigger auth recovery.
+   */
+  isStaleAuthorizationFailure(error) {
+    return Boolean(
+      error &&
+      typeof error === 'object' &&
+      Number.isInteger(error.tokenGeneration) &&
+      error.tokenGeneration !== this.tokenGeneration,
+    );
   }
 
   /**
@@ -546,7 +574,7 @@ class Smartthings extends utils.Adapter {
           return false;
         }
         this.session = res.data;
-        this.config.token = res.data.access_token;
+        this.setAccessToken(res.data.access_token);
         this.log.info('Login successful.');
         return true;
       })
@@ -814,7 +842,7 @@ class Smartthings extends utils.Adapter {
         return false;
       }
       this.session = nextSession;
-      this.config.token = nextSession.access_token;
+      this.setAccessToken(nextSession.access_token);
       this.lastAuthFailureTerminal = false;
       this.lastAuthFailureType = 'unknown';
       this.tokenRefreshRetryAttempt = 0;
@@ -923,7 +951,7 @@ class Smartthings extends utils.Adapter {
               } catch (error) {
                 if (this.shuttingDown) return false;
                 const status = error && typeof error === 'object' && error.response && error.response.status;
-                if (status === 401) {
+                if (status === 401 && !this.isStaleAuthorizationFailure(error)) {
                   this.handleUnauthorizedResponse();
                   return false;
                 }
@@ -1051,7 +1079,7 @@ class Smartthings extends utils.Adapter {
         }
       } catch (error) {
         const status = error && typeof error === 'object' && error.response && error.response.status;
-        if (status === 401) {
+        if (status === 401 && !this.isStaleAuthorizationFailure(error)) {
           this.handleUnauthorizedResponse();
           break;
         }
@@ -1105,16 +1133,26 @@ class Smartthings extends utils.Adapter {
 
   /**
    * Track abortable SmartThings API requests so unload prevents follow-up
-   * processing and releases queued network work.
-   * @param {object} config Axios request configuration.
+   * processing and releases queued network work. Authenticated requests also
+   * carry the token generation they were dispatched with so late 401 responses
+   * can be distinguished from failures of the current token.
+   * @param {Record<string, any>} config Axios request configuration.
    * @returns {Promise<any>} Axios response.
    */
   async requestApi(config) {
     if (this.shuttingDown) throw Object.assign(new Error('adapter shutting down'), { code: 'ERR_CANCELED' });
+    const tokenGeneration = this.tokenGeneration;
+    const headers = config && config.headers;
+    const authenticated = Boolean(headers && (headers.Authorization || headers.authorization));
     const controller = new AbortController();
     this.apiAbortControllers.add(controller);
     try {
       return await this.requestClient({ ...config, signal: controller.signal });
+    } catch (error) {
+      if (authenticated && error && typeof error === 'object') {
+        error.tokenGeneration = tokenGeneration;
+      }
+      throw error;
     } finally {
       this.apiAbortControllers.delete(controller);
     }
@@ -1162,7 +1200,7 @@ class Smartthings extends utils.Adapter {
     } catch (error) {
       if (this.shuttingDown) return;
       const status = error && typeof error === 'object' && error.response && error.response.status;
-      if (status === 401) {
+      if (status === 401 && !this.isStaleAuthorizationFailure(error)) {
         this.handleUnauthorizedResponse();
         this.log.info('SmartThings status authorization expired; scheduling recovery');
         return;
@@ -1288,7 +1326,8 @@ class Smartthings extends utils.Adapter {
             if (this.shuttingDown) {
               return;
             }
-            if (error && typeof error === 'object' && error.response && error.response.status === 401) {
+            if (error && typeof error === 'object' && error.response && error.response.status === 401 &&
+              !this.isStaleAuthorizationFailure(error)) {
               this.handleUnauthorizedResponse();
             }
             this.log.error(formatRequestError(error));

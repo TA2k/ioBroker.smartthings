@@ -904,6 +904,149 @@ describe('SmartThings authentication lifecycle', () => {
     }
   });
 
+  it('ignores a late 401 from a request started with a replaced access token', async () => {
+    const adapter = createAdapter({ config: { token: 'token-a' } });
+    adapter.session = { refresh_token: 'refresh-a', access_token: 'token-a', expires_in: 3600 };
+    /** @type {string | undefined} */
+    let statusAuthorization;
+    /** @type {((reason?: unknown) => void) | undefined} */
+    let rejectStatus;
+    /** @type {() => void} */
+    let reportStatusStarted = () => {};
+    const statusStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportStatusStarted = () => resolve(); })
+    );
+    let refreshCalls = 0;
+    adapter.requestClient = async (request) => {
+      if (request.url.includes('/subscriptions')) {
+        return { data: { subscriptionId: 'subscription-id' } };
+      }
+      if (request.url.includes('/status')) {
+        statusAuthorization = request.headers.Authorization;
+        reportStatusStarted();
+        return new Promise((resolve, reject) => { rejectStatus = reject; });
+      }
+      if (request.url.includes('/oauth2/token')) {
+        refreshCalls++;
+        return { data: { access_token: 'token-b', refresh_token: 'refresh-b', expires_in: 3600 } };
+      }
+      throw new Error('unexpected request');
+    };
+    assert.equal(await adapter.connectSSE(), true);
+    const eventSource = latestEventSource;
+    const timerSet = globalThis.setTimeout;
+    const scheduled = [];
+    try {
+      globalThis.setTimeout = (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      };
+      const statusRequest = adapter.fetchDeviceStatus({ id: 'device-a', type: 'Switch' });
+      await statusStarted;
+      assert.equal(statusAuthorization, 'Bearer token-a');
+      assert.equal(await adapter.refreshToken(), true);
+      assert.equal(adapter.config.token, 'token-b');
+      if (!rejectStatus) throw new Error('expected the status request to be pending');
+      rejectStatus(createHttpError(401));
+      await statusRequest;
+      assert.equal(refreshCalls, 1);
+      assert.equal(eventSource.closed, false);
+      assert.equal(adapter.sseEventSource, eventSource);
+      assert.equal(adapter.authorizationInvalid, false);
+      assert.equal(adapter.refreshInterval, null);
+      assert.equal(scheduled.length, 0);
+      assert.ok(adapter.logMessages.some((message) => message.includes('HTTP 401')));
+    } finally {
+      globalThis.setTimeout = timerSet;
+    }
+  });
+
+  it('starts one coordinated recovery for a 401 from the current token generation', async () => {
+    const adapter = createAdapter({ config: { token: 'token-b' } });
+    adapter.session = { refresh_token: 'refresh-b', access_token: 'token-b', expires_in: 3600 };
+    /** @type {((reason?: unknown) => void) | undefined} */
+    let rejectStatus;
+    /** @type {() => void} */
+    let reportStatusStarted = () => {};
+    const statusStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportStatusStarted = () => resolve(); })
+    );
+    let refreshCalls = 0;
+    adapter.requestClient = async (request) => {
+      if (request.url.includes('/status')) {
+        reportStatusStarted();
+        return new Promise((resolve, reject) => { rejectStatus = reject; });
+      }
+      if (request.url.includes('/oauth2/token')) {
+        refreshCalls++;
+        return { data: { access_token: 'token-c', refresh_token: 'refresh-c', expires_in: 3600 } };
+      }
+      throw new Error('unexpected request');
+    };
+    const timerSet = globalThis.setTimeout;
+    const scheduled = [];
+    try {
+      globalThis.setTimeout = (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      };
+      const statusRequest = adapter.fetchDeviceStatus({ id: 'device-a', type: 'Switch' });
+      await statusStarted;
+      if (!rejectStatus) throw new Error('expected the status request to be pending');
+      rejectStatus(createHttpError(401));
+      await statusRequest;
+      assert.deepEqual(scheduled.map((entry) => entry.delay), [0]);
+      assert.equal(adapter.authorizationInvalid, true);
+      await scheduled[0].callback();
+      assert.equal(refreshCalls, 1);
+      assert.equal(adapter.config.token, 'token-c');
+      assert.equal(adapter.authorizationInvalid, false);
+      assert.equal(adapter.tokenGeneration, 1);
+    } finally {
+      globalThis.setTimeout = timerSet;
+    }
+  });
+
+  it('prevents auth recovery and background work when shutdown begins before a late 401', async () => {
+    const adapter = createAdapter({ config: { token: 'token-a' } });
+    adapter.session = { refresh_token: 'refresh-a', access_token: 'token-a', expires_in: 3600 };
+    /** @type {AbortSignal | undefined} */
+    let requestSignal;
+    /** @type {((reason?: unknown) => void) | undefined} */
+    let rejectStatus;
+    /** @type {() => void} */
+    let reportStatusStarted = () => {};
+    const statusStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportStatusStarted = () => resolve(); })
+    );
+    adapter.requestClient = async (request) => {
+      if (request.url.includes('/status')) {
+        requestSignal = request.signal;
+        reportStatusStarted();
+        return new Promise((resolve, reject) => { rejectStatus = reject; });
+      }
+      if (request.url.includes('/oauth2/token')) {
+        return { data: { access_token: 'token-b', refresh_token: 'refresh-b', expires_in: 3600 } };
+      }
+      throw new Error('unexpected request');
+    };
+    const statusRequest = adapter.fetchDeviceStatus({ id: 'device-a', type: 'Switch' });
+    await statusStarted;
+    assert.equal(await adapter.refreshToken(), true);
+    assert.equal(adapter.config.token, 'token-b');
+    await adapter.onUnload(() => {});
+    const statesAfterUnload = adapter.states.length;
+    if (!requestSignal) throw new Error('expected the status request signal to be captured');
+    assert.equal(requestSignal.aborted, true);
+    if (!rejectStatus) throw new Error('expected the status request to be pending');
+    rejectStatus(createHttpError(401));
+    await statusRequest;
+    assert.equal(adapter.authorizationInvalid, false);
+    assert.equal(adapter.refreshInterval, null);
+    assert.equal(adapter.states.length, statesAfterUnload);
+    assert.equal(adapter.logMessages.some((message) => message.includes('scheduling recovery')), false);
+  });
+
   it('cancels the scheduled token refresh during unload', async () => {
     const adapter = createAdapter({ config: {} });
     adapter.session = { refresh_token: 'test-refresh', expires_in: 60 };
