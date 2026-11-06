@@ -48,6 +48,7 @@ class Smartthings extends utils.Adapter {
     this.refreshInterval = null;
     this.refreshTimeout = null;
     this.tokenRefreshPromise = null;
+    this.tokenRefreshCyclePromise = null;
     this.tokenRefreshRetryAttempt = 0;
     this.shuttingDown = false;
     this.lastAuthFailureTerminal = false;
@@ -122,15 +123,28 @@ class Smartthings extends utils.Adapter {
 
     // A token string alone is not proof of authorization. Verify it with
     // SmartThings before starting polling and the SSE subscription.
-    if (!await this.getDeviceList()) {
+    const deviceListAvailable = await this.getDeviceList();
+    if (this.shuttingDown) {
+      return;
+    }
+    if (!deviceListAvailable) {
       this.log.warn('SmartThings device list unavailable; skipping polling and SSE');
       this.stopAuthenticatedOperations();
       return;
     }
     this.authorizationInvalid = false;
 
+    if (this.shuttingDown) {
+      return;
+    }
     await this.connectSSE();
+    if (this.shuttingDown) {
+      return;
+    }
     await this.updateDevices();
+    if (this.shuttingDown) {
+      return;
+    }
     this.updateInterval = setInterval(async () => {
       await this.updateDevices();
     }, this.config.interval * 1000);
@@ -204,46 +218,68 @@ class Smartthings extends utils.Adapter {
       return;
     }
     const delayMs = retryDelayMs === undefined ? getTokenRefreshDelayMs(this.session.expires_in) : retryDelayMs;
-    this.refreshInterval = setTimeout(async () => {
+    this.refreshInterval = setTimeout(() => {
       this.refreshInterval = null;
       if (this.shuttingDown) {
         return;
       }
-      let refreshed = false;
-      try {
-        refreshed = await this.refreshToken();
-      } catch (error) {
-        this.lastAuthFailureType = classifyAuthError(error);
-        this.lastAuthFailureTerminal = this.lastAuthFailureType === 'terminal';
-        this.log.error('SmartThings token refresh failed: ' + formatRequestError(error));
-      }
-      if (this.shuttingDown) {
-        return;
-      }
-      if (refreshed) {
-        this.scheduleTokenRefresh();
-      } else if (this.lastAuthFailureTerminal) {
-        this.log.error('SmartThings authorization expired; please authorize the adapter again');
-        this.stopAuthenticatedOperations();
-      } else if (this.lastAuthFailureType === 'transient') {
-        if (this.tokenRefreshRetryAttempt >= MAX_TOKEN_REFRESH_RETRIES) {
-          this.log.error('SmartThings token refresh retry limit reached');
-          if (this.authorizationInvalid) {
-            this.stopAuthenticatedOperations();
-          }
-          return;
-        }
-        const retryDelay = TOKEN_REFRESH_RETRY_BASE_MS * (2 ** this.tokenRefreshRetryAttempt);
-        this.tokenRefreshRetryAttempt++;
-        this.log.warn('SmartThings token refresh failed temporarily; scheduling a bounded retry');
-        this.scheduleTokenRefresh(retryDelay);
-      } else {
-        this.log.error('SmartThings token refresh failed with an unclassified response; automatic retry disabled');
+      return this.runTokenRefreshCycle();
+    }, delayMs);
+  }
+
+  /**
+   * Share both the HTTP refresh and its result/retry planning. This prevents
+   * concurrent 401 handlers from incrementing backoff counters independently.
+   * @returns {Promise<void>}
+   */
+  async runTokenRefreshCycle() {
+    if (this.tokenRefreshCyclePromise) {
+      return this.tokenRefreshCyclePromise;
+    }
+    this.tokenRefreshCyclePromise = this.performTokenRefreshCycle();
+    try {
+      await this.tokenRefreshCyclePromise;
+    } finally {
+      this.tokenRefreshCyclePromise = null;
+    }
+  }
+
+  /** @returns {Promise<void>} */
+  async performTokenRefreshCycle() {
+    let refreshed = false;
+    try {
+      refreshed = await this.refreshToken();
+    } catch (error) {
+      this.lastAuthFailureType = classifyAuthError(error);
+      this.lastAuthFailureTerminal = this.lastAuthFailureType === 'terminal';
+      this.log.error('SmartThings token refresh failed: ' + formatRequestError(error));
+    }
+    if (this.shuttingDown) {
+      return;
+    }
+    if (refreshed) {
+      this.scheduleTokenRefresh();
+    } else if (this.lastAuthFailureTerminal) {
+      this.log.error('SmartThings authorization expired; please authorize the adapter again');
+      this.stopAuthenticatedOperations();
+    } else if (this.lastAuthFailureType === 'transient') {
+      if (this.tokenRefreshRetryAttempt >= MAX_TOKEN_REFRESH_RETRIES) {
+        this.log.error('SmartThings token refresh retry limit reached');
         if (this.authorizationInvalid) {
           this.stopAuthenticatedOperations();
         }
+        return;
       }
-    }, delayMs);
+      const retryDelay = TOKEN_REFRESH_RETRY_BASE_MS * (2 ** this.tokenRefreshRetryAttempt);
+      this.tokenRefreshRetryAttempt++;
+      this.log.warn('SmartThings token refresh failed temporarily; scheduling a bounded retry');
+      this.scheduleTokenRefresh(retryDelay);
+    } else {
+      this.log.error('SmartThings token refresh failed with an unclassified response; automatic retry disabled');
+      if (this.authorizationInvalid) {
+        this.stopAuthenticatedOperations();
+      }
+    }
   }
 
   async login() {
@@ -449,6 +485,9 @@ class Smartthings extends utils.Adapter {
   }
 
   async connectSSE() {
+    if (this.shuttingDown) {
+      return false;
+    }
     const subscriptionId = await this.requestClient({
       method: 'post',
       maxBodyLength: Infinity,
@@ -575,6 +614,9 @@ class Smartthings extends utils.Adapter {
 
     if (!subscriptionId) {
       this.log.warn('SmartThings SSE subscription unavailable; continuing with scheduled polling');
+      return false;
+    }
+    if (this.shuttingDown) {
       return false;
     }
 
@@ -725,6 +767,9 @@ class Smartthings extends utils.Adapter {
    * @returns {Promise<boolean>} Whether a valid device list was processed.
    */
   async getDeviceList(attempt = 0) {
+    if (this.shuttingDown) {
+      return false;
+    }
     return this.requestClient({
       method: 'get',
       url: 'https://api.smartthings.com/v1/devices',
@@ -734,6 +779,9 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
+        if (this.shuttingDown) {
+          return false;
+        }
         if (!res || !res.data || !Array.isArray(res.data.items)) {
           this.log.error('SmartThings device list response is invalid');
           return false;
@@ -871,6 +919,9 @@ class Smartthings extends utils.Adapter {
           const retryDelay = DEVICE_LIST_RETRY_BASE_MS * (2 ** attempt);
           this.log.warn('SmartThings device list temporarily unavailable; retrying with backoff');
           await this.waitForRetry(retryDelay);
+          if (this.shuttingDown) {
+            return false;
+          }
           return this.getDeviceList(attempt + 1);
         }
         return false;

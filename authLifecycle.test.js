@@ -291,6 +291,39 @@ describe('SmartThings authentication lifecycle', () => {
     }
   });
 
+  it('plans one retry when concurrent 401 recovery paths fail transiently', async () => {
+    const adapter = createAdapter({ config: { token: 'expired-access' } });
+    adapter.session = { refresh_token: 'valid-refresh', expires_in: 3600 };
+    let requestCalls = 0;
+    /** @type {(reason?: unknown) => void} */
+    let rejectRequest = () => {};
+    adapter.requestClient = async () => {
+      requestCalls++;
+      return new Promise((resolve, reject) => {
+        rejectRequest = (reason) => reject(reason);
+      });
+    };
+    const timerSet = global.setTimeout;
+    const scheduled = [];
+    try {
+      global.setTimeout = (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      };
+      adapter.handleUnauthorizedResponse();
+      const firstRefresh = scheduled[0].callback();
+      adapter.handleUnauthorizedResponse();
+      const secondRefresh = scheduled[1].callback();
+      rejectRequest(createHttpError(503));
+      await Promise.all([firstRefresh, secondRefresh]);
+      assert.equal(requestCalls, 1);
+      assert.equal(adapter.tokenRefreshRetryAttempt, 1);
+      assert.equal(scheduled.filter((entry) => entry.delay === 300000).length, 1);
+    } finally {
+      global.setTimeout = timerSet;
+    }
+  });
+
   it('keeps polling available when the SSE subscription cannot be created', async () => {
     const adapter = createAdapter({ config: { token: 'secret-token' } });
     adapter.requestClient = async () => {
@@ -412,6 +445,49 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(await adapter.getDeviceList(), false);
     assert.equal(requestCalls, 1);
     assert.equal(adapter.states.some((entry) => entry[0] === 'info.connection' && entry[1] === true), false);
+  });
+
+  it('does not restart a device-list request after shutdown during backoff', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    let requestCalls = 0;
+    /** @type {() => void} */
+    let releaseRetry = () => {};
+    /** @type {() => void} */
+    let reportWaitStarted = () => {};
+    const waitStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportWaitStarted = () => resolve(); })
+    );
+    adapter.requestClient = async () => {
+      requestCalls++;
+      throw createHttpError(503);
+    };
+    adapter.waitForRetry = async () => {
+      reportWaitStarted();
+      await /** @type {Promise<void>} */ (
+        new Promise((resolve) => { releaseRetry = () => resolve(); })
+      );
+    };
+    const deviceListResult = adapter.getDeviceList();
+    await waitStarted;
+    adapter.shuttingDown = true;
+    releaseRetry();
+    assert.equal(await deviceListResult, false);
+    assert.equal(requestCalls, 1);
+    assert.equal(adapter.states.some((entry) => entry[0] === 'info.connection' && entry[1] === true), false);
+  });
+
+  it('does not start SSE or polling when shutdown begins after device-list validation', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    let sseCalls = 0;
+    adapter.getDeviceList = async () => {
+      adapter.shuttingDown = true;
+      return true;
+    };
+    adapter.connectSSE = async () => { sseCalls++; return true; };
+    await adapter.onReady();
+    assert.equal(sseCalls, 0);
+    assert.equal(adapter.updateInterval, null);
+    assert.equal(adapter.updateVirtualInterval, null);
   });
 
   it('marks authorization invalid and avoids follow-up polling after a command receives 401', async () => {
