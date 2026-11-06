@@ -28,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
 
@@ -59,15 +59,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        node-version: [24.x, 20.x, 22.x]
+        node-version: [22.x, 24.x]
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
 
@@ -107,10 +107,10 @@ jobs:
 #
 #        steps:
 #            - name: Checkout code
-#              uses: actions/checkout@v4
+#              uses: actions/checkout@v5
 #
 #            - name: Use Node.js ${{ matrix.node-version }}
-#              uses: actions/setup-node@v4
+#              uses: actions/setup-node@v5
 #              with:
 #                  node-version: ${{ matrix.node-version }}
 #

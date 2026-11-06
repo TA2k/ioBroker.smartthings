@@ -67,6 +67,8 @@ class Smartthings extends utils.Adapter {
     this.json2iob = new Json2iob(this.writeGuardedAdapter);
     this.statusJson2iob = new Json2iob(this.writeGuardedAdapter);
     this.deviceArray = [];
+    // Only discovered capability states are authorized to issue API commands.
+    this.commandStateIds = new Map();
     this.discoveredDevices = [];
     this.deviceDiscoveryAvailable = false;
     this.session = {};
@@ -900,6 +902,7 @@ class Smartthings extends utils.Adapter {
         this.discoveredDevices = normalizeDiscoveredDevices(res.data.items, roomNames);
         this.deviceDiscoveryAvailable = true;
         this.deviceArray = [];
+        this.commandStateIds.clear();
         this.locationIds = [];
         this.setState('info.connection', true, true);
         this.authorizationInvalid = false;
@@ -1003,8 +1006,9 @@ class Smartthings extends utils.Adapter {
           for (const ocfDeviceCommandName in ocfDeviceCommands) {
             if (this.shuttingDown) return;
             const ocfDeviceCommand = ocfDeviceCommands[ocfDeviceCommandName];
+            const relativeId = device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName;
             await this.writeGuardedAdapter.setObjectNotExistsAsync(
-              device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName,
+              relativeId,
               {
                 type: 'state',
                 common: {
@@ -1027,6 +1031,13 @@ class Smartthings extends utils.Adapter {
                 },
               },
             );
+            if (!this.shuttingDown && !this.authorizationInvalid) {
+              this.commandStateIds.set(relativeId, {
+                deviceId: device.deviceId,
+                capability: 'ocf',
+                command: 'postOcfCommand.' + ocfDeviceCommandName,
+              });
+            }
           }
           commandCreated = true;
         }
@@ -1041,9 +1052,17 @@ class Smartthings extends utils.Adapter {
             for (const enumElement of firstArgument.schema.enum) common.states[enumElement] = enumElement;
           }
         }
-        await this.writeGuardedAdapter.setObjectNotExistsAsync(device.deviceId + '.capabilities.' + letsubIdName, {
+        const relativeId = device.deviceId + '.capabilities.' + letsubIdName;
+        await this.writeGuardedAdapter.setObjectNotExistsAsync(relativeId, {
           type: 'state', common, native: {},
         });
+        if (!this.shuttingDown && !this.authorizationInvalid) {
+          this.commandStateIds.set(relativeId, {
+            deviceId: device.deviceId,
+            capability: idName,
+            command: element,
+          });
+        }
       }
     }
   }
@@ -1268,77 +1287,67 @@ class Smartthings extends utils.Adapter {
    * @param {ioBroker.State | null | undefined} state
    */
   async onStateChange(id, state) {
-    if (this.shuttingDown) {
+    if (this.shuttingDown || !state || state.ack) return;
+    if (this.authorizationInvalid) {
+      this.log.warn('SmartThings command ignored because authorization is invalid');
       return;
     }
-    if (state) {
-      if (!state.ack) {
-        if (this.authorizationInvalid) {
-          this.log.warn('SmartThings command ignored because authorization is invalid');
-          return;
-        }
-        const idArray = id.split('.');
-        const deviceId = idArray[2];
-        idArray.splice(0, 4);
-        let capadId = idArray.join('.');
-        const commandId = capadId.split('-')[1];
-        capadId = capadId.split('-')[0];
+    if (typeof id !== 'string' || !id.startsWith(this.namespace + '.')) return;
+    const relativeId = id.slice(this.namespace.length + 1);
+    const idParts = relativeId.split('.');
+    // Feedback states and unknown paths are not executable commands.
+    if (idParts.length < 3 || idParts[1] !== 'capabilities') return;
+    const commandInfo = this.commandStateIds.get(relativeId);
+    if (!commandInfo) return;
 
-        let data = { commands: [{ capability: capadId, command: commandId }] };
-        if (typeof state.val !== 'boolean') {
-          data.commands[0].arguments = [state.val];
-        }
+    const deviceId = commandInfo.deviceId;
+    let data = { commands: [{ capability: commandInfo.capability, command: commandInfo.command }] };
+    if (typeof state.val !== 'boolean') data.commands[0].arguments = [state.val];
 
-        if (capadId === 'ocf' && commandId.startsWith('postOcfCommand')) {
-          const commandObject = await this.getForeignObjectAsync(id).then((result) => result);
-          if (this.shuttingDown) {
-            return;
-          }
-          if (commandObject) {
-            const candidate = this.ocfDeviceFactory.getOcfCommandData(
-              commandObject.native.deviceManufacturerCode,
-              commandObject.native.presentationId,
-              commandObject.native.deviceId,
-              commandObject.native.commandName,
-              state.val,
-            );
-            if (candidate !== null) {
-              data = candidate;
-            }
-          }
-        }
-
-        this.log.debug('Sending SmartThings device command');
-        await this.requestApi({
-          method: 'post',
-          url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
-          headers: {
-            'User-Agent': 'ioBroker',
-            Authorization: 'Bearer ' + this.config.token,
-          },
-          data: data,
-        })
-          .then((res) => {
-            this.log.debug('SmartThings device command accepted');
-            return res.data;
-          })
-          .catch((error) => {
-            if (this.shuttingDown) {
-              return;
-            }
-            if (error && typeof error === 'object' && error.response && error.response.status === 401 &&
-              !this.isStaleAuthorizationFailure(error)) {
-              this.handleUnauthorizedResponse();
-            }
-            this.log.error(formatRequestError(error));
-          });
-        if (!this.shuttingDown && !this.authorizationInvalid) {
-          clearTimeout(this.refreshTimeout);
-          this.refreshTimeout = setTimeout(async () => {
-            await this.updateDevices();
-          }, 10 * 1000);
-        }
+    if (commandInfo.capability === 'ocf' && commandInfo.command.startsWith('postOcfCommand')) {
+      const commandObject = await this.getForeignObjectAsync(id);
+      if (this.shuttingDown || this.authorizationInvalid) return;
+      if (!commandObject || !commandObject.native) {
+        this.log.warn('SmartThings OCF command metadata unavailable; ignoring command');
+        return;
       }
+      const candidate = this.ocfDeviceFactory.getOcfCommandData(
+        commandObject.native.deviceManufacturerCode,
+        commandObject.native.presentationId,
+        commandObject.native.deviceId,
+        commandObject.native.commandName,
+        state.val,
+      );
+      if (candidate === null) return;
+      data = candidate;
+    }
+
+    if (this.shuttingDown || this.authorizationInvalid) return;
+    this.log.debug('Sending SmartThings device command');
+    try {
+      await this.requestApi({
+        method: 'post',
+        url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
+        headers: {
+          'User-Agent': 'ioBroker',
+          Authorization: 'Bearer ' + this.config.token,
+        },
+        data,
+      });
+      if (!this.shuttingDown) this.log.debug('SmartThings device command accepted');
+    } catch (error) {
+      if (this.shuttingDown) return;
+      if (error && typeof error === 'object' && error.response && error.response.status === 401 &&
+        !this.isStaleAuthorizationFailure(error)) {
+        this.handleUnauthorizedResponse();
+      }
+      this.log.error(formatRequestError(error));
+    }
+    if (!this.shuttingDown && !this.authorizationInvalid) {
+      clearTimeout(this.refreshTimeout);
+      this.refreshTimeout = setTimeout(async () => {
+        await this.updateDevices();
+      }, 10 * 1000);
     }
   }
 }
