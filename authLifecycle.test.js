@@ -22,12 +22,15 @@ class EventSourceDouble {
     this.onopen = () => {};
     this.onerror = () => {};
     this.onmessage = async () => {};
+    this.closed = false;
     latestEventSource = this;
   }
 
   addEventListener(name, listener) {
     this.listeners[name] = listener;
   }
+
+  close() { this.closed = true; }
 }
 class AdapterDouble {
   constructor(options) {
@@ -40,6 +43,7 @@ class AdapterDouble {
     this.log = { debug: log, info: log, warn: log, error: log };
     this.namespace = 'smartthings.0';
     this.states = [];
+    this.messages = [];
   }
 
   on() {}
@@ -50,6 +54,7 @@ class AdapterDouble {
   async setObjectNotExistsAsync() {}
   async extendObject() {}
   async getForeignObjectAsync() { return null; }
+  sendTo(...args) { this.messages.push(args); }
 }
 let createAdapter;
 try {
@@ -86,6 +91,20 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(adapter.updateInterval, null);
     assert.equal(adapter.authorizationInvalid, true);
     assert.ok(adapter.states.some((entry) => entry[0] === 'info.connection' && entry[1] === false));
+  });
+
+  it('rejects callback ciphertext that the backend AES decoder cannot consume', async () => {
+    const adapter = createAdapter({
+      config: {
+        codeUrl: 'samsungconnect://samsungaccount/callback?action=authorize&code=xyz0&retValue=22bb&state=44cc',
+      },
+    });
+    let requestCalls = 0;
+    adapter.requestClient = async () => { requestCalls++; return { data: {} }; };
+    assert.equal(await adapter.login(), false);
+    assert.equal(requestCalls, 0);
+    assert.ok(adapter.logMessages.some((message) => message.includes('callback encoding')));
+    assert.equal(adapter.logMessages.join(' ').includes('xyz0'), false);
   });
 
   it('verifies a manually configured token before enabling SSE and polling', async () => {
@@ -390,6 +409,55 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(logs.includes('private-device-value'), false);
   });
 
+  it('routes named and unnamed SSE frames through the canonical coordinator', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    const events = [];
+    adapter.statusCoordinator = {
+      onEvent: (data, name) => { events.push([data, name]); return true; },
+      close: () => {},
+    };
+    adapter.requestClient = async () => ({ data: { subscriptionId: 'subscription-id' } });
+    assert.equal(await adapter.connectSSE(), true);
+    latestEventSource.onmessage({ data: '{"eventType":"DEVICE_EVENT"}' });
+    latestEventSource.listeners.DEVICE_EVENT({ data: '{"deviceEvent":{}}' });
+    assert.deepEqual(events, [
+      ['{"eventType":"DEVICE_EVENT"}', 'message'],
+      ['{"deviceEvent":{}}', 'DEVICE_EVENT'],
+    ]);
+  });
+
+  it('closes EventSource during shutdown', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    adapter.requestClient = async () => ({ data: { subscriptionId: 'subscription-id' } });
+    assert.equal(await adapter.connectSSE(), true);
+    const eventSource = latestEventSource;
+    await adapter.onUnload(() => {});
+    assert.equal(eventSource.closed, true);
+    assert.equal(adapter.sseEventSource, null);
+  });
+
+  it('aborts in-flight status requests and suppresses writes after shutdown', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    let requestSignal;
+    /** @type {(value: unknown) => void} */
+    let resolveRequest = () => {};
+    let parses = 0;
+    adapter.statusJson2iob = { parse: async () => { parses++; } };
+    adapter.requestClient = async (request) => {
+      requestSignal = request.signal;
+      return new Promise((resolve) => { resolveRequest = (value) => resolve(value); });
+    };
+    const statusRequest = adapter.fetchDeviceStatus({ id: 'device-a', type: 'Switch' });
+    await Promise.resolve();
+    await adapter.onUnload(() => {});
+    assert.equal(requestSignal.aborted, true);
+    resolveRequest({ data: { components: { main: { switch: {} } } } });
+    await statusRequest;
+    assert.equal(parses, 0);
+    assert.deepEqual(adapter.responseCache, {});
+    assert.deepEqual(adapter.rawResponseCache, {});
+  });
+
   it('does not log raw device-list or status payloads', async () => {
     const adapter = createAdapter({ config: { token: 'access-token' } });
     adapter.requestClient = async (request) => {
@@ -406,6 +474,44 @@ describe('SmartThings authentication lifecycle', () => {
     const logs = adapter.logMessages.join(' ');
     assert.equal(logs.includes('private-device-list'), false);
     assert.equal(logs.includes('private-status-value'), false);
+  });
+
+  it('keeps excluded devices discoverable with available room names', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    adapter.excludeDeviceSet = new Set(['excluded-device']);
+    adapter.requestClient = async (request) => {
+      if (request.url.endsWith('/v1/devices')) {
+        return { data: { items: [{
+          deviceId: 'excluded-device', label: 'Kitchen light', roomId: 'room-a',
+          locationId: 'location-a', deviceTypeName: 'Light',
+        }] } };
+      }
+      if (request.url.endsWith('/v1/locations/location-a/rooms')) {
+        return { data: { items: [{ roomId: 'room-a', name: 'Kitchen' }] } };
+      }
+      throw new Error('unexpected request');
+    };
+    assert.equal(await adapter.getDeviceList(), true);
+    assert.deepEqual(adapter.deviceArray, []);
+    assert.deepEqual(adapter.discoveredDevices, [{
+      id: 'excluded-device', name: 'Kitchen light', roomId: 'room-a', roomName: 'Kitchen',
+      locationId: 'location-a', type: 'Light',
+    }]);
+    adapter.onMessage({ from: 'system.adapter.admin.0', command: 'getDiscoveredDevices', callback: { id: 1 } });
+    assert.equal(adapter.messages.length, 1);
+    assert.equal(adapter.messages[0][2].devices[0].id, 'excluded-device');
+    assert.equal(Object.prototype.hasOwnProperty.call(adapter.messages[0][2], 'token'), false);
+  });
+
+  it('preserves prior discovery data when a later device fetch fails', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    adapter.discoveredDevices = [{ id: 'offline-device', name: 'Offline device' }];
+    adapter.deviceDiscoveryAvailable = true;
+    adapter.waitForRetry = async () => {};
+    adapter.requestClient = async () => { throw createHttpError(503); };
+    assert.equal(await adapter.getDeviceList(), false);
+    assert.deepEqual(adapter.discoveredDevices, [{ id: 'offline-device', name: 'Offline device' }]);
+    assert.equal(adapter.config.excludeDevices, '');
   });
 
   it('reports getDeviceList HTTP errors without propagating credentials', async () => {

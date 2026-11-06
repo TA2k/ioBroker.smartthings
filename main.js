@@ -11,6 +11,10 @@ const axios = require('axios').default;
 const Json2iob = require('json2iob');
 const OcfDeviceFactory = require('./lib/ocf/ocfDeviceFactory');
 const { compactStatus } = require('./lib/compactStatus');
+const { writeDeviceStatus, StatusCoordinator } = require('./lib/sseStatus');
+const { createWriteGuardedAdapter } = require('./lib/writeGuard');
+const { normalizeDiscoveredDevices } = require('./lib/deviceDiscovery');
+const { validateCallbackValues } = require('./admin/loginHelper');
 const {
   normalizePollingInterval,
   normalizeVirtualInterval,
@@ -42,6 +46,7 @@ class Smartthings extends utils.Adapter {
     this.on('ready', this.onReady.bind(this));
     this.on('stateChange', this.onStateChange.bind(this));
     this.on('unload', this.onUnload.bind(this));
+    this.on('message', this.onMessage.bind(this));
     this.requestClient = axios.create();
     this.updateInterval = null;
     this.updateVirtualInterval = null;
@@ -55,8 +60,12 @@ class Smartthings extends utils.Adapter {
     this.lastAuthFailureType = 'unknown';
     this.authorizationInvalid = false;
     this.reLoginTimeout = null;
-    this.json2iob = new Json2iob(this);
+    this.writeGuardedAdapter = createWriteGuardedAdapter(this, () => !this.shuttingDown);
+    this.json2iob = new Json2iob(this.writeGuardedAdapter);
+    this.statusJson2iob = new Json2iob(this.writeGuardedAdapter);
     this.deviceArray = [];
+    this.discoveredDevices = [];
+    this.deviceDiscoveryAvailable = false;
     this.session = {};
     this.ocfDeviceFactory = new OcfDeviceFactory();
     this.session = {};
@@ -65,6 +74,18 @@ class Smartthings extends utils.Adapter {
     this.rawResponseCache = {};
     this.excludeDeviceSet = new Set();
     this.excludeStateEndingsArray = [];
+    this.sseEventSource = null;
+    this.apiAbortControllers = new Set();
+    this.statusCoordinator = new StatusCoordinator({
+      refresh: async (deviceId) => {
+        const device = this.deviceArray.find((item) => item.id === deviceId);
+        if (device) await this.fetchDeviceStatus(device);
+      },
+      isKnownDevice: (deviceId) => this.deviceArray.some((item) => item.id === deviceId) &&
+        !this.excludeDeviceSet.has(deviceId),
+      onError: () => this.log.error('SmartThings status refresh failed'),
+      maxConcurrent: 4,
+    });
   }
 
   /**
@@ -320,6 +341,10 @@ class Smartthings extends utils.Adapter {
       this.log.error('Invalid SmartThings code URL; please enter a new callback URL');
       return false;
     }
+    if (!validateCallbackValues(parameter)) {
+      this.log.error('Invalid SmartThings callback encoding; please enter a complete hexadecimal callback URL');
+      return false;
+    }
 
     let codeDecrypted;
     let username;
@@ -488,7 +513,7 @@ class Smartthings extends utils.Adapter {
     if (this.shuttingDown) {
       return false;
     }
-    const subscriptionId = await this.requestClient({
+    const subscriptionId = await this.requestApi({
       method: 'post',
       maxBodyLength: Infinity,
       url: 'https://api.smartthings.com/subscriptions',
@@ -620,6 +645,10 @@ class Smartthings extends utils.Adapter {
       return false;
     }
 
+    if (this.sseEventSource) {
+      this.sseEventSource.close();
+      this.sseEventSource = null;
+    }
     let es;
     try {
       es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
@@ -636,6 +665,7 @@ class Smartthings extends utils.Adapter {
       this.log.error('Unable to initialize SmartThings SSE: ' + formatRequestError(error));
       return false;
     }
+    this.sseEventSource = es;
     es.onopen = () => {
       this.log.info('Connected to SmartThings SSE endpoint.');
     };
@@ -644,33 +674,16 @@ class Smartthings extends utils.Adapter {
       this.log.error('Error with SSE connection: ' + formatRequestError(err));
     };
 
-    es.onmessage = async (event) => {
-      if (this.authorizationInvalid || this.shuttingDown) {
-        return;
-      }
-      try {
-        const data = JSON.parse(event.data);
-        // APK uses eventType field, not event
-        if (data.eventType === 'DEVICE_EVENT' && data.deviceEvent) {
-          const de = data.deviceEvent;
-
-          // Update state directly from SSE event (real-time update)
-          const statePath = `${de.deviceId}.status.components.main.${de.capability}.${de.attribute}.value`;
-          if (de.stateChange) {
-            await this.setStateAsync(statePath, de.value, true);
-          }
-        } else if (data.eventType === 'DEVICE_HEALTH_EVENT' && data.deviceHealthEvent) {
-          this.log.debug('Received SmartThings device health event');
-        }
-      } catch (error) {
-        this.log.error('Error parsing SSE event data: ' + formatRequestError(error));
+    es.onmessage = (event) => {
+      if (!this.authorizationInvalid && !this.shuttingDown) {
+        this.statusCoordinator.onEvent(event.data, 'message');
       }
     };
 
     es.addEventListener('DEVICE_EVENT', (event) => {
-      // Do not log named-event payloads because they may contain private
-      // device data. Canonical named-event processing is handled separately.
-      void event;
+      if (!this.authorizationInvalid && !this.shuttingDown) {
+        this.statusCoordinator.onEvent(event.data, 'DEVICE_EVENT');
+      }
     });
     return true;
   }
@@ -770,7 +783,7 @@ class Smartthings extends utils.Adapter {
     if (this.shuttingDown) {
       return false;
     }
-    return this.requestClient({
+    return this.requestApi({
       method: 'get',
       url: 'https://api.smartthings.com/v1/devices',
       headers: {
@@ -786,6 +799,12 @@ class Smartthings extends utils.Adapter {
           this.log.error('SmartThings device list response is invalid');
           return false;
         }
+        const roomNames = await this.getRoomNames(res.data.items);
+        if (this.shuttingDown || this.authorizationInvalid) return false;
+        this.discoveredDevices = normalizeDiscoveredDevices(res.data.items, roomNames);
+        this.deviceDiscoveryAvailable = true;
+        this.deviceArray = [];
+        this.locationIds = [];
         this.setState('info.connection', true, true);
         this.authorizationInvalid = false;
         this.log.info(res.data.items.length + ' devices detected');
@@ -798,21 +817,21 @@ class Smartthings extends utils.Adapter {
             continue;
           }
           this.deviceArray.push({ id: device.deviceId, type: device.deviceTypeName });
-          await this.setObjectNotExistsAsync(device.deviceId, {
+          await this.writeGuardedAdapter.setObjectNotExistsAsync(device.deviceId, {
             type: 'device',
             common: {
               name: device.label,
             },
             native: {},
           });
-          await this.setObjectNotExistsAsync(device.deviceId + '.capabilities', {
+          await this.writeGuardedAdapter.setObjectNotExistsAsync(device.deviceId + '.capabilities', {
             type: 'channel',
             common: {
               name: 'Capabilities/Remote Controls',
             },
             native: {},
           });
-          await this.setObjectNotExistsAsync(device.deviceId + '.general', {
+          await this.writeGuardedAdapter.setObjectNotExistsAsync(device.deviceId + '.general', {
             type: 'channel',
             common: {
               name: 'General Information',
@@ -820,94 +839,31 @@ class Smartthings extends utils.Adapter {
             native: {},
           });
 
-          // const remoteArray = [];
-          if (device.components && device.components[0] && device.components[0].capabilities) {
-            device.components[0].capabilities.forEach(async (capability) => {
-              await this.requestClient({
-                method: 'get',
-                url: 'https://api.smartthings.com/v1/capabilities/' + capability.id + '/' + capability.version,
-                headers: {
-                  'User-Agent': 'ioBroker',
-                  Authorization: 'Bearer ' + this.config.token,
-                },
-              })
-                .then(async (res) => {
-                  const idName = res.data.id;
-                  Object.keys(res.data.commands).forEach(async (element) => {
-                    const common = {
-                      name: '',
-                      type: 'boolean',
-                      role: 'boolean',
-                      write: true,
-                      read: true,
-                    };
-                    const letsubIdName = idName + '-' + element;
-
-                    let commandCreated = false;
-                    if (idName === 'ocf' && element === 'postOcfCommand') {
-                      const ocfDevice = this.ocfDeviceFactory.getOcfDevice(device.deviceManufacturerCode, device.presentationId);
-                      if (ocfDevice) {
-                        const ocfDeviceCommands = ocfDevice.getOcfCommands();
-                        for (const ocfDeviceCommandName in ocfDeviceCommands) {
-                          const ocfDeviceCommand = ocfDeviceCommands[ocfDeviceCommandName];
-
-                          const objectRaw = {
-                            type: 'state',
-                            common: {
-                              name: '',
-                              type: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
-                              role: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
-                              min: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.min ? ocfDeviceCommand.iobroker.min : 0,
-                              max: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.max ? ocfDeviceCommand.iobroker.max : 0,
-                              states:
-                                ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.states ? ocfDeviceCommand.iobroker.states : null,
-                              write: true,
-                              read: true,
-                            },
-                            native: {
-                              type: 'OcfCommand',
-                              deviceManufacturerCode: device.deviceManufacturerCode,
-                              presentationId: device.presentationId,
-                              deviceId: device.deviceId,
-                              commandName: ocfDeviceCommandName,
-                            },
-                          };
-                          await this.setObjectNotExistsAsync(
-                            device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName,
-                            objectRaw,
-                          );
-                        }
-                        commandCreated = true;
-                      }
-                    }
-
-                    if (!commandCreated) {
-                      if (res.data.commands[element].arguments[0]) {
-                        common.type = res.data.commands[element].arguments[0].schema.type;
-                        if (common.type === 'integer') {
-                          common.type = 'number';
-                        }
-                        common.role = 'state';
-                        if (res.data.commands[element].arguments[0].schema.enum) {
-                          common.states = {};
-                          res.data.commands[element].arguments[0].schema.enum.forEach((enumElement) => {
-                            common.states[enumElement] = enumElement;
-                          });
-                        }
-                      }
-                      await this.setObjectNotExistsAsync(device.deviceId + '.capabilities.' + letsubIdName, {
-                        type: 'state',
-                        common: common,
-                        native: {},
-                      });
-                    }
-                  });
-                })
-                .catch((error) => {
-                  this.log.error(formatRequestError(error));
+          if (device.components && device.components[0] && Array.isArray(device.components[0].capabilities)) {
+            for (const capability of device.components[0].capabilities) {
+              if (this.shuttingDown || this.authorizationInvalid) return false;
+              try {
+                const capabilityResponse = await this.requestApi({
+                  method: 'get',
+                  url: 'https://api.smartthings.com/v1/capabilities/' + capability.id + '/' + capability.version,
+                  headers: {
+                    'User-Agent': 'ioBroker',
+                    Authorization: 'Bearer ' + this.config.token,
+                  },
                 });
-            });
+                await this.createCapabilityObjects(device, capabilityResponse.data);
+              } catch (error) {
+                if (this.shuttingDown) return false;
+                const status = error && typeof error === 'object' && error.response && error.response.status;
+                if (status === 401) {
+                  this.handleUnauthorizedResponse();
+                  return false;
+                }
+                this.log.error('SmartThings capability unavailable: ' + formatRequestError(error));
+              }
+            }
           }
+          if (this.shuttingDown) return false;
           await this.json2iob.parse(device.deviceId + '.general', device);
         }
         return true;
@@ -929,6 +885,112 @@ class Smartthings extends utils.Adapter {
   }
 
   /**
+   * @param {object} device SmartThings device metadata.
+   * @param {object} capabilityData SmartThings capability definition.
+   * @returns {Promise<void>}
+   */
+  async createCapabilityObjects(device, capabilityData) {
+    if (this.shuttingDown || !capabilityData || !capabilityData.commands) return;
+    const idName = capabilityData.id;
+    for (const element of Object.keys(capabilityData.commands)) {
+      if (this.shuttingDown) return;
+      const common = { name: '', type: 'boolean', role: 'boolean', write: true, read: true };
+      const letsubIdName = idName + '-' + element;
+      let commandCreated = false;
+      if (idName === 'ocf' && element === 'postOcfCommand') {
+        const ocfDevice = this.ocfDeviceFactory.getOcfDevice(device.deviceManufacturerCode, device.presentationId);
+        if (ocfDevice) {
+          const ocfDeviceCommands = ocfDevice.getOcfCommands();
+          for (const ocfDeviceCommandName in ocfDeviceCommands) {
+            if (this.shuttingDown) return;
+            const ocfDeviceCommand = ocfDeviceCommands[ocfDeviceCommandName];
+            await this.writeGuardedAdapter.setObjectNotExistsAsync(
+              device.deviceId + '.capabilities.' + letsubIdName + '.' + ocfDeviceCommandName,
+              {
+                type: 'state',
+                common: {
+                  name: '',
+                  type: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
+                  role: ocfDeviceCommand.iobroker ? ocfDeviceCommand.iobroker.type : ocfDeviceCommand.type,
+                  min: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.min ? ocfDeviceCommand.iobroker.min : 0,
+                  max: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.max ? ocfDeviceCommand.iobroker.max : 0,
+                  states: ocfDeviceCommand.iobroker && ocfDeviceCommand.iobroker.states ?
+                    ocfDeviceCommand.iobroker.states : null,
+                  write: true,
+                  read: true,
+                },
+                native: {
+                  type: 'OcfCommand',
+                  deviceManufacturerCode: device.deviceManufacturerCode,
+                  presentationId: device.presentationId,
+                  deviceId: device.deviceId,
+                  commandName: ocfDeviceCommandName,
+                },
+              },
+            );
+          }
+          commandCreated = true;
+        }
+      }
+      if (!commandCreated) {
+        const firstArgument = capabilityData.commands[element].arguments && capabilityData.commands[element].arguments[0];
+        if (firstArgument && firstArgument.schema) {
+          common.type = firstArgument.schema.type === 'integer' ? 'number' : firstArgument.schema.type;
+          common.role = 'state';
+          if (firstArgument.schema.enum) {
+            common.states = {};
+            for (const enumElement of firstArgument.schema.enum) common.states[enumElement] = enumElement;
+          }
+        }
+        await this.writeGuardedAdapter.setObjectNotExistsAsync(device.deviceId + '.capabilities.' + letsubIdName, {
+          type: 'state', common, native: {},
+        });
+      }
+    }
+  }
+
+  /**
+   * Resolve available room display names without making device discovery
+   * depend on room metadata being reachable.
+   * @param {Array<object>} devices Valid SmartThings device-list items.
+   * @returns {Promise<Map<string, string>>} Room ID to display name.
+   */
+  async getRoomNames(devices) {
+    const roomNames = new Map();
+    const locationIds = [...new Set(devices
+      .map((device) => device && device.locationId)
+      .filter((locationId) => typeof locationId === 'string' && locationId))];
+    for (const locationId of locationIds) {
+      if (this.shuttingDown || this.authorizationInvalid) break;
+      try {
+        const res = await this.requestApi({
+          method: 'get',
+          url: 'https://api.smartthings.com/v1/locations/' + locationId + '/rooms',
+          headers: {
+            'User-Agent': 'ioBroker',
+            Authorization: 'Bearer ' + this.config.token,
+          },
+        });
+        if (res && res.data && Array.isArray(res.data.items)) {
+          for (const room of res.data.items) {
+            if (room && typeof room.roomId === 'string' && typeof room.name === 'string') {
+              roomNames.set(room.roomId, room.name);
+            }
+          }
+        }
+      } catch (error) {
+        const status = error && typeof error === 'object' && error.response && error.response.status;
+        if (status === 401) {
+          this.handleUnauthorizedResponse();
+          break;
+        }
+        this.log.warn('SmartThings room metadata unavailable: ' + formatRequestError(error));
+      }
+    }
+    return roomNames;
+  }
+
+  /**
    * Isolated for deterministic lifecycle tests without real delays.
    * @param {number} delayMs Backoff delay.
    * @returns {Promise<void>}
@@ -937,81 +999,75 @@ class Smartthings extends utils.Adapter {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
+  /**
+   * Track abortable SmartThings API requests so unload prevents follow-up
+   * processing and releases queued network work.
+   * @param {object} config Axios request configuration.
+   * @returns {Promise<any>} Axios response.
+   */
+  async requestApi(config) {
+    if (this.shuttingDown) throw Object.assign(new Error('adapter shutting down'), { code: 'ERR_CANCELED' });
+    const controller = new AbortController();
+    this.apiAbortControllers.add(controller);
+    try {
+      return await this.requestClient({ ...config, signal: controller.signal });
+    } finally {
+      this.apiAbortControllers.delete(controller);
+    }
+  }
+
   async updateDevices(onlyVirtualSwitch) {
-    if (this.authorizationInvalid) {
+    if (this.authorizationInvalid || this.shuttingDown) {
       return;
     }
-    const statusArray = [
-      {
-        path: 'status',
-        url: 'https://api.smartthings.com/v1/devices/$id/status',
-        desc: 'Status of the device',
-      },
-    ];
-
-    const headers = {
-      'User-Agent': 'ioBroker',
-      Authorization: 'Bearer ' + this.config.token,
-    };
     for (const device of this.deviceArray) {
-      if (onlyVirtualSwitch && device.type !== 'Virtual Switch') {
-        continue;
+      if (this.shuttingDown || this.authorizationInvalid) return;
+      if (onlyVirtualSwitch && device.type !== 'Virtual Switch') continue;
+      await this.statusCoordinator.request(device.id);
+    }
+  }
+
+  /**
+   * Fetch and persist one canonical status for polling and SSE refreshes.
+   * @param {{ id: string, type: string }} device Known enabled device.
+   */
+  async fetchDeviceStatus(device) {
+    if (this.shuttingDown || this.authorizationInvalid) return;
+    try {
+      const res = await this.requestApi({
+        method: 'get',
+        url: 'https://api.smartthings.com/v1/devices/' + device.id + '/status',
+        headers: {
+          'User-Agent': 'ioBroker',
+          Authorization: 'Bearer ' + this.config.token,
+        },
+      });
+      if (this.shuttingDown || !res || !res.data) return;
+      const written = await writeDeviceStatus(device.id, res.data, {
+        parse: (path, data, options) => this.statusJson2iob.parse(path, data, options),
+        cache: this.responseCache,
+        rawCache: this.rawResponseCache,
+        compactMode: this.config.compactMode,
+        compact: compactStatus,
+        excludeEndings: this.excludeStateEndingsArray,
+        isActive: () => !this.shuttingDown && !this.authorizationInvalid,
+      });
+      if (written && !this.shuttingDown) {
+        this.setState('info.connection', true, true);
       }
-      for (const element of statusArray) {
-        const url = element.url.replace('$id', device.id);
-
-        try {
-          const res = await this.requestClient({
-            method: 'get',
-            url: url,
-            headers: headers,
-          });
-
-          if (!res.data) {
-            continue;
-          }
-          this.setState('info.connection', true, true);
-          let data = res.data;
-          let keys = Object.keys(data);
-          if (keys.length === 1) {
-            data = data[keys[0]];
-          }
-          keys = Object.keys(data);
-          if (keys.length === 1) {
-            data = data[keys[0]];
-          }
-          const forceIndex = undefined;
-          const preferedArrayName = undefined;
-
-          const cacheKey = device.id + '.' + element.path;
-          const rawData = data;
-          const previousRawData = this.rawResponseCache[cacheKey];
-          if (this.config.compactMode) {
-            data = compactStatus(data, previousRawData);
-          }
-          const previousData = this.responseCache[cacheKey];
-
-          await this.json2iob.parse(device.id + '.' + element.path, data, {
-            forceIndex: forceIndex,
-            preferedArrayName: preferedArrayName,
-            channelName: element.desc,
-            excludeStateWithEnding: this.excludeStateEndingsArray,
-            previousData: previousData,
-          });
-
-          this.rawResponseCache[cacheKey] = rawData;
-          this.responseCache[cacheKey] = data;
-        } catch (error) {
-          if (error && typeof error === 'object' && error.response && error.response.status === 401) {
-            this.handleUnauthorizedResponse();
-            this.log.info(element.path + ' receive 401 error. Please use new Token');
-            return;
-          }
-
-          this.log.error('Failed to update SmartThings device status');
-          this.log.error(formatRequestError(error));
-        }
+    } catch (error) {
+      if (this.shuttingDown) return;
+      const status = error && typeof error === 'object' && error.response && error.response.status;
+      if (status === 401) {
+        this.handleUnauthorizedResponse();
+        this.log.info('SmartThings status authorization expired; scheduling recovery');
+        return;
       }
+      if (status === 429) {
+        this.log.warn('SmartThings status rate limit reached; waiting for scheduled polling');
+        return;
+      }
+      this.log.error('Failed to update SmartThings device status: ' + formatRequestError(error));
     }
   }
 
@@ -1021,6 +1077,17 @@ class Smartthings extends utils.Adapter {
    */
   async onUnload(callback) {
     this.shuttingDown = true;
+    this.statusCoordinator.close();
+    for (const controller of this.apiAbortControllers) controller.abort();
+    this.apiAbortControllers.clear();
+    if (this.sseEventSource) {
+      try {
+        this.sseEventSource.close();
+      } catch {
+        this.log.warn('Unable to close SmartThings SSE cleanly');
+      }
+      this.sseEventSource = null;
+    }
     if (this.refreshInterval) {
       clearTimeout(this.refreshInterval);
       this.refreshInterval = null;
@@ -1043,6 +1110,20 @@ class Smartthings extends utils.Adapter {
       this.log.error(formatRequestError(e));
       callback();
     }
+  }
+
+  /**
+   * Expose non-secret discovery data to the instance configuration UI. The UI
+   * never receives a SmartThings access token and never calls Samsung itself.
+   * @param {ioBroker.Message | null | undefined} obj Adapter message.
+   */
+  onMessage(obj) {
+    if (!obj || obj.command !== 'getDiscoveredDevices' || !obj.callback) return;
+    this.sendTo(obj.from, obj.command, {
+      ok: this.deviceDiscoveryAvailable,
+      connected: this.deviceDiscoveryAvailable && !this.authorizationInvalid && !this.shuttingDown,
+      devices: this.discoveredDevices.map((device) => ({ ...device })),
+    }, obj.callback);
   }
 
   /**
@@ -1086,7 +1167,7 @@ class Smartthings extends utils.Adapter {
         }
 
         this.log.debug('Sending SmartThings device command');
-        await this.requestClient({
+        await this.requestApi({
           method: 'post',
           url: 'https://api.smartthings.com/v1/devices/' + deviceId + '/commands',
           headers: {
