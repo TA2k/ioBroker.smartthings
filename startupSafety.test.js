@@ -9,6 +9,7 @@ const {
   getTokenRefreshDelayMs,
   hasAccessToken,
   mergeRefreshedSession,
+  classifyAuthError,
   isTerminalAuthError,
   parseExclusionList,
   parseStoredSession,
@@ -89,15 +90,23 @@ describe('startupSafety', () => {
       expect(mergeRefreshedSession(original, { error: '401', refresh_token: 'bad' })).to.equal(null);
     });
 
-    it('distinguishes terminal OAuth failures from temporary request failures', () => {
-      expect(isTerminalAuthError({ response: { status: 400 } })).to.equal(true);
+    it('classifies terminal OAuth failures without treating unknown HTTP 400 as terminal', () => {
+      expect(classifyAuthError({ response: { status: 400 } })).to.equal('unknown');
+      expect(isTerminalAuthError({ response: { status: 400 } })).to.equal(false);
       expect(isTerminalAuthError({ response: { status: 401 } })).to.equal(true);
       expect(isTerminalAuthError({ response: { status: 200, data: { error: 'invalid_grant' } } })).to.equal(true);
       expect(isTerminalAuthError({ response: { status: 403, data: { error: 'invalid_token' } } })).to.equal(true);
       expect(isTerminalAuthError({ response: { status: 403, data: { error: 'unauthorized_client' } } })).to.equal(true);
-      expect(isTerminalAuthError({ response: { status: 500 } })).to.equal(false);
-      expect(isTerminalAuthError({ code: 'ECONNRESET' })).to.equal(false);
-      expect(isTerminalAuthError('invalid_grant')).to.equal(false);
+    });
+
+    it('separates transient HTTP and network failures from unknown errors', () => {
+      expect(classifyAuthError({ response: { status: 503 } })).to.equal('transient');
+      expect(classifyAuthError({ response: { status: 429 } })).to.equal('transient');
+      expect(classifyAuthError({ code: 'ECONNRESET' })).to.equal('transient');
+      expect(classifyAuthError({ response: { status: 400, data: { error: 'temporarily_unavailable' } } }))
+        .to.equal('transient');
+      expect(classifyAuthError({ response: { status: 403 } })).to.equal('unknown');
+      expect(classifyAuthError('invalid_grant')).to.equal('unknown');
     });
   });
 

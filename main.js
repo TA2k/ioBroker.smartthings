@@ -18,7 +18,7 @@ const {
   getTokenRefreshDelayMs,
   hasAccessToken,
   mergeRefreshedSession,
-  isTerminalAuthError,
+  classifyAuthError,
   parseExclusionList,
   parseStoredSession,
   formatRequestError,
@@ -26,6 +26,10 @@ const {
 const crypto = require('crypto');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
+const MAX_TOKEN_REFRESH_RETRIES = 3;
+const TOKEN_REFRESH_RETRY_BASE_MS = 300000;
+const MAX_DEVICE_LIST_ATTEMPTS = 3;
+const DEVICE_LIST_RETRY_BASE_MS = 1000;
 class Smartthings extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -43,8 +47,11 @@ class Smartthings extends utils.Adapter {
     this.updateVirtualInterval = null;
     this.refreshInterval = null;
     this.refreshTimeout = null;
+    this.tokenRefreshPromise = null;
+    this.tokenRefreshRetryAttempt = 0;
     this.shuttingDown = false;
     this.lastAuthFailureTerminal = false;
+    this.lastAuthFailureType = 'unknown';
     this.authorizationInvalid = false;
     this.reLoginTimeout = null;
     this.json2iob = new Json2iob(this);
@@ -177,13 +184,15 @@ class Smartthings extends utils.Adapter {
       this.scheduleTokenRefresh(0);
     } else {
       this.lastAuthFailureTerminal = true;
+      this.lastAuthFailureType = 'terminal';
       this.stopAuthenticatedOperations();
     }
   }
 
   /**
    * Re-arm a bounded one-shot token refresh after each successful renewal.
-   * Failures retry after five minutes without starting a tight auth loop.
+   * Transient failures use capped exponential backoff; terminal and unknown
+   * responses never create an automatic retry loop.
    * @param {number} [retryDelayMs] Override for bounded retry delays.
    */
   scheduleTokenRefresh(retryDelayMs) {
@@ -204,6 +213,8 @@ class Smartthings extends utils.Adapter {
       try {
         refreshed = await this.refreshToken();
       } catch (error) {
+        this.lastAuthFailureType = classifyAuthError(error);
+        this.lastAuthFailureTerminal = this.lastAuthFailureType === 'terminal';
         this.log.error('SmartThings token refresh failed: ' + formatRequestError(error));
       }
       if (this.shuttingDown) {
@@ -214,9 +225,23 @@ class Smartthings extends utils.Adapter {
       } else if (this.lastAuthFailureTerminal) {
         this.log.error('SmartThings authorization expired; please authorize the adapter again');
         this.stopAuthenticatedOperations();
+      } else if (this.lastAuthFailureType === 'transient') {
+        if (this.tokenRefreshRetryAttempt >= MAX_TOKEN_REFRESH_RETRIES) {
+          this.log.error('SmartThings token refresh retry limit reached');
+          if (this.authorizationInvalid) {
+            this.stopAuthenticatedOperations();
+          }
+          return;
+        }
+        const retryDelay = TOKEN_REFRESH_RETRY_BASE_MS * (2 ** this.tokenRefreshRetryAttempt);
+        this.tokenRefreshRetryAttempt++;
+        this.log.warn('SmartThings token refresh failed temporarily; scheduling a bounded retry');
+        this.scheduleTokenRefresh(retryDelay);
       } else {
-        this.log.warn('SmartThings token refresh failed; retrying in five minutes');
-        this.scheduleTokenRefresh(300000);
+        this.log.error('SmartThings token refresh failed with an unclassified response; automatic retry disabled');
+        if (this.authorizationInvalid) {
+          this.stopAuthenticatedOperations();
+        }
       }
     }, delayMs);
   }
@@ -608,12 +633,31 @@ class Smartthings extends utils.Adapter {
     return true;
   }
   async refreshToken() {
+    if (this.tokenRefreshPromise) {
+      return this.tokenRefreshPromise;
+    }
+    this.tokenRefreshPromise = this.performTokenRefresh();
+    try {
+      return await this.tokenRefreshPromise;
+    } finally {
+      this.tokenRefreshPromise = null;
+    }
+  }
+
+  /**
+   * Execute one token request. Callers use refreshToken(), which provides the
+   * single-flight guard for concurrent HTTP-401 recovery paths.
+   * @returns {Promise<boolean>} Whether a usable session was persisted.
+   */
+  async performTokenRefresh() {
     if (!this.session.refresh_token) {
       this.lastAuthFailureTerminal = true;
+      this.lastAuthFailureType = 'terminal';
       this.log.debug('No refresh_token found');
       return false;
     }
     this.lastAuthFailureTerminal = false;
+    this.lastAuthFailureType = 'unknown';
     this.log.debug('Start refresh token');
     try {
       const res = await this.requestClient({
@@ -641,9 +685,10 @@ class Smartthings extends utils.Adapter {
       });
       const nextSession = mergeRefreshedSession(this.session, res && res.data);
       if (!nextSession) {
-        this.lastAuthFailureTerminal = isTerminalAuthError({
+        this.lastAuthFailureType = classifyAuthError({
           response: { status: res && res.status, data: res && res.data },
         });
+        this.lastAuthFailureTerminal = this.lastAuthFailureType === 'terminal';
         this.log.error('SmartThings refresh response contains no usable tokens');
         return false;
       }
@@ -651,24 +696,35 @@ class Smartthings extends utils.Adapter {
       this.session = nextSession;
       this.config.token = nextSession.access_token;
       this.lastAuthFailureTerminal = false;
+      this.lastAuthFailureType = 'unknown';
+      this.tokenRefreshRetryAttempt = 0;
       this.authorizationInvalid = false;
       // A refreshed token is not proof that the SmartThings API is reachable.
       // Keep the connection indicator offline until the next API request
       // succeeds if this refresh was triggered by a 401.
       return true;
     } catch (error) {
-      this.lastAuthFailureTerminal = isTerminalAuthError(error);
+      this.lastAuthFailureType = classifyAuthError(error);
+      this.lastAuthFailureTerminal = this.lastAuthFailureType === 'terminal';
       this.log.error(formatRequestError(error));
       if (this.lastAuthFailureTerminal) {
         this.log.warn('SmartThings refresh credentials are no longer valid');
-      } else {
+      } else if (this.lastAuthFailureType === 'transient') {
         this.log.warn('SmartThings token refresh failed temporarily');
+      } else {
+        this.log.warn('SmartThings token refresh response was not recognized');
       }
       return false;
     }
   }
 
-  async getDeviceList() {
+  /**
+   * Retry only failures explicitly classified as transient. Unknown HTTP 400
+   * responses and credential rejections return false immediately.
+   * @param {number} [attempt=0] Zero-based bounded retry attempt.
+   * @returns {Promise<boolean>} Whether a valid device list was processed.
+   */
+  async getDeviceList(attempt = 0) {
     return this.requestClient({
       method: 'get',
       url: 'https://api.smartthings.com/v1/devices',
@@ -808,11 +864,26 @@ class Smartthings extends utils.Adapter {
         }
         return true;
       })
-      .catch((error) => {
+      .catch(async (error) => {
         this.setState('info.connection', false, true);
         this.log.error(formatRequestError(error));
+        if (classifyAuthError(error) === 'transient' && attempt + 1 < MAX_DEVICE_LIST_ATTEMPTS && !this.shuttingDown) {
+          const retryDelay = DEVICE_LIST_RETRY_BASE_MS * (2 ** attempt);
+          this.log.warn('SmartThings device list temporarily unavailable; retrying with backoff');
+          await this.waitForRetry(retryDelay);
+          return this.getDeviceList(attempt + 1);
+        }
         return false;
       });
+  }
+
+  /**
+   * Isolated for deterministic lifecycle tests without real delays.
+   * @param {number} delayMs Backoff delay.
+   * @returns {Promise<void>}
+   */
+  async waitForRetry(delayMs) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
   async updateDevices(onlyVirtualSwitch) {

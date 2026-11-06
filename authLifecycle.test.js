@@ -160,13 +160,38 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(adapter.lastAuthFailureTerminal, true);
   });
 
-  it('retries a malformed refresh response without an allowlisted OAuth error', async () => {
+  it('classifies an OAuth server error as transient without replacing the session', async () => {
     const adapter = createAdapter({ config: { token: 'old-access' } });
     adapter.session = { refresh_token: 'old-refresh', access_token: 'old-access' };
     adapter.requestClient = async () => ({ status: 200, data: { error: 'server_error' } });
     assert.equal(await adapter.refreshToken(), false);
     assert.equal(adapter.lastAuthFailureTerminal, false);
+    assert.equal(adapter.lastAuthFailureType, 'transient');
     assert.equal(adapter.config.token, 'old-access');
+  });
+
+  it('does not retry an unknown HTTP 400 refresh response automatically', async () => {
+    const adapter = createAdapter({ config: { token: 'old-access' } });
+    adapter.session = { refresh_token: 'old-refresh', access_token: 'old-access', expires_in: 60 };
+    adapter.requestClient = async () => {
+      throw createHttpError(400, { error: 'unrecognized_error' });
+    };
+    const timerSet = global.setTimeout;
+    const scheduled = [];
+    try {
+      global.setTimeout = (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      };
+      adapter.scheduleTokenRefresh();
+      await scheduled[0].callback();
+      assert.equal(scheduled.length, 1);
+      assert.equal(adapter.lastAuthFailureType, 'unknown');
+      assert.equal(adapter.lastAuthFailureTerminal, false);
+      assert.ok(adapter.logMessages.some((message) => message.includes('automatic retry disabled')));
+    } finally {
+      global.setTimeout = timerSet;
+    }
   });
 
   it('stops retrying and marks the connection offline after a terminal refresh failure', async () => {
@@ -198,10 +223,12 @@ describe('SmartThings authentication lifecycle', () => {
     }
   });
 
-  it('retries temporary refresh failures without marking the connection offline', async () => {
+  it('bounds transient refresh retries with exponential backoff', async () => {
     const adapter = createAdapter({ config: { token: 'current-access-token' } });
     adapter.session = { refresh_token: 'valid-refresh', expires_in: 60 };
+    let requestCalls = 0;
     adapter.requestClient = async () => {
+      requestCalls++;
       throw createHttpError(503);
     };
     const timerSet = global.setTimeout;
@@ -213,11 +240,52 @@ describe('SmartThings authentication lifecycle', () => {
       };
       adapter.scheduleTokenRefresh();
       await scheduled[0].callback();
-      assert.equal(scheduled.length, 2);
-      assert.equal(scheduled[1].delay, 300000);
+      await scheduled[1].callback();
+      await scheduled[2].callback();
+      await scheduled[3].callback();
+      assert.deepEqual(scheduled.map((entry) => entry.delay), [30000, 300000, 600000, 1200000]);
+      assert.equal(requestCalls, 4);
       assert.equal(adapter.lastAuthFailureTerminal, false);
+      assert.equal(adapter.lastAuthFailureType, 'transient');
       assert.equal(adapter.authorizationInvalid, false);
       assert.equal(adapter.states.some((entry) => entry[0] === 'info.connection' && entry[1] === false), false);
+      assert.ok(adapter.logMessages.some((message) => message.includes('retry limit reached')));
+    } finally {
+      global.setTimeout = timerSet;
+    }
+  });
+
+  it('shares one in-flight refresh request across concurrent 401 recovery paths', async () => {
+    const adapter = createAdapter({ config: { token: 'expired-access' } });
+    adapter.session = { refresh_token: 'valid-refresh', expires_in: 3600 };
+    let requestCalls = 0;
+    /** @type {(value: unknown) => void} */
+    let resolveRequest = () => {};
+    adapter.requestClient = async () => {
+      requestCalls++;
+      return new Promise((resolve) => {
+        resolveRequest = resolve;
+      });
+    };
+    const timerSet = global.setTimeout;
+    const scheduled = [];
+    try {
+      global.setTimeout = (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      };
+      adapter.handleUnauthorizedResponse();
+      const firstRefresh = scheduled[0].callback();
+      adapter.handleUnauthorizedResponse();
+      const secondRefresh = scheduled[1].callback();
+      assert.equal(requestCalls, 1);
+      resolveRequest({
+        data: { access_token: 'renewed-access', refresh_token: 'valid-refresh', expires_in: 3600 },
+      });
+      await Promise.all([firstRefresh, secondRefresh]);
+      assert.equal(requestCalls, 1);
+      assert.equal(adapter.config.token, 'renewed-access');
+      assert.equal(adapter.authorizationInvalid, false);
     } finally {
       global.setTimeout = timerSet;
     }
@@ -315,6 +383,35 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(await adapter.getDeviceList(), false);
     assert.ok(adapter.logMessages.includes('HTTP 401'));
     assert.equal(adapter.logMessages.join(' ').includes('secret-token'), false);
+  });
+
+  it('retries HTTP 503 device-list failures with bounded backoff', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    const delays = [];
+    let requestCalls = 0;
+    adapter.waitForRetry = async (delay) => { delays.push(delay); };
+    adapter.requestClient = async () => {
+      requestCalls++;
+      throw createHttpError(503);
+    };
+    assert.equal(await adapter.getDeviceList(), false);
+    assert.equal(requestCalls, 3);
+    assert.deepEqual(delays, [1000, 2000]);
+    const connectionStates = adapter.states.filter((entry) => entry[0] === 'info.connection');
+    assert.equal(connectionStates[connectionStates.length - 1][1], false);
+  });
+
+  it('does not retry or accept an unknown HTTP 400 device-list response', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    let requestCalls = 0;
+    adapter.waitForRetry = async () => { throw new Error('unexpected retry'); };
+    adapter.requestClient = async () => {
+      requestCalls++;
+      throw createHttpError(400, { error: 'unrecognized_error' });
+    };
+    assert.equal(await adapter.getDeviceList(), false);
+    assert.equal(requestCalls, 1);
+    assert.equal(adapter.states.some((entry) => entry[0] === 'info.connection' && entry[1] === true), false);
   });
 
   it('marks authorization invalid and avoids follow-up polling after a command receives 401', async () => {
