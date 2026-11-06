@@ -16,10 +16,35 @@
 
 Adapter for Samsung Smartthings
 
-## Login process:
+## Login process
 
-Open the link in the adapter settings and login until you see a white Screen.
-Open the Developer Console F12 or Option + Command + I and copy the blue samsungconnect:// url and paste it in the settings.
+The adapter currently uses a Samsung app callback rather than a standard registered
+SmartThings OAuth application. This remains a **manual** step; the new guided login
+assistant validates the callback format but does not itself authenticate the account.
+
+1. In the adapter settings, choose **Open Samsung sign-in in a new tab** and sign in.
+2. On a **desktop browser**, inspect the failed `samsungconnect://` redirect in
+   the browser developer console (F12 on Chrome/Firefox) and copy its **full link
+   address**, not just the shortened text displayed in the console.
+3. Paste the callback or a console line containing it into the dedicated helper
+   field, then choose **Validate and use callback**.
+4. Save the instance settings and allow the adapter to attempt the login.
+
+The callback URL is sensitive: it can contain short-lived authorization data.
+Do not publish it in screenshots, logs or support issues. The helper processes
+pasted input locally in the admin browser, does not call an external service,
+and only saves a callback after checking the expected scheme, host, path, and
+required callback parameters. Validation is **not** proof of successful login.
+
+Some mobile browsers cannot expose the failed custom-scheme redirect. In those
+cases, use a desktop browser for the current legacy process. Automatically
+completing account linking would require registering a separate SmartThings
+OAuth application, with app credentials and a permitted HTTPS callback endpoint;
+this is **not implemented** by the guided helper.
+
+SmartThings documentation:
+[OAuth 2.0 flow](https://developer.smartthings.com/docs/service-integrations/oauth),
+[API Access App setup](https://developer.smartthings.com/docs/service-integrations/app-setup).
 
 ## Controling
 

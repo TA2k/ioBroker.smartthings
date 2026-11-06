@@ -113,6 +113,10 @@
     "connectionType": "cloud",
     "dataSource": "poll",
     "materialize": true,
+    "messagebox": true,
+    "supportedMessages": {
+      "custom": true
+    },
     "dependencies": [
       {
         "js-controller": ">=3.0.0"
