@@ -271,6 +271,9 @@ class Smartthings extends utils.Adapter {
     try {
       refreshed = await this.refreshToken();
     } catch (error) {
+      if (this.shuttingDown) {
+        return;
+      }
       this.lastAuthFailureType = classifyAuthError(error);
       this.lastAuthFailureTerminal = this.lastAuthFailureType === 'terminal';
       this.log.error('SmartThings token refresh failed: ' + formatRequestError(error));
@@ -304,6 +307,9 @@ class Smartthings extends utils.Adapter {
   }
 
   async login() {
+    if (this.shuttingDown) {
+      return false;
+    }
     this.log.info('Start login via code url');
 
     const initialPayload = {
@@ -363,7 +369,7 @@ class Smartthings extends utils.Adapter {
       return false;
     }
 
-    const userInfos = await this.requestClient({
+    const userInfos = await this.requestApi({
       method: 'post',
       maxBodyLength: Infinity,
       url: 'https://eu-auth2.samsungosp.com/auth/oauth2/authenticate',
@@ -403,14 +409,19 @@ class Smartthings extends utils.Adapter {
         return res.data;
       })
       .catch((error) => {
-        this.log.error(formatRequestError(error));
-        this.log.error('Please use a new code url');
+        if (!this.shuttingDown) {
+          this.log.error(formatRequestError(error));
+          this.log.error('Please use a new code url');
+        }
       });
+    if (this.shuttingDown) {
+      return false;
+    }
     if (!userInfos || !userInfos.userauth_token) {
       this.log.error('No userauth_token found');
       return false;
     }
-    const codeInfos = await this.requestClient({
+    const codeInfos = await this.requestApi({
       method: 'get',
       maxBodyLength: Infinity,
       url: 'https://eu-auth2.samsungosp.com/auth/oauth2/v2/authorize',
@@ -442,13 +453,18 @@ class Smartthings extends utils.Adapter {
         return res.data;
       })
       .catch((error) => {
-        this.log.error(formatRequestError(error));
+        if (!this.shuttingDown) {
+          this.log.error(formatRequestError(error));
+        }
       });
+    if (this.shuttingDown) {
+      return false;
+    }
     if (!codeInfos || typeof codeInfos.code !== 'string') {
       this.log.error('SmartThings authorization did not return a code');
       return false;
     }
-    const loginSucceeded = await this.requestClient({
+    const loginSucceeded = await this.requestApi({
       method: 'post',
       maxBodyLength: Infinity,
       url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
@@ -474,11 +490,13 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then(async (res) => {
+        if (this.shuttingDown) {
+          return false;
+        }
         if (!res || !res.data || !hasAccessToken(res.data.access_token)) {
           this.log.error('SmartThings token exchange returned no usable access token');
           return false;
         }
-        this.session = res.data;
         await this.extendObject('authInformation', {
           type: 'channel',
           common: {
@@ -486,6 +504,9 @@ class Smartthings extends utils.Adapter {
           },
           native: {},
         });
+        if (this.shuttingDown) {
+          return false;
+        }
         await this.extendObject('authInformation.session', {
           type: 'state',
           common: {
@@ -497,13 +518,22 @@ class Smartthings extends utils.Adapter {
           },
           native: {},
         });
-        this.log.info('Login successful.');
-        await this.setStateAsync('authInformation.session', JSON.stringify(this.session), true);
+        if (this.shuttingDown) {
+          return false;
+        }
+        await this.setStateAsync('authInformation.session', JSON.stringify(res.data), true);
+        if (this.shuttingDown) {
+          return false;
+        }
+        this.session = res.data;
         this.config.token = res.data.access_token;
+        this.log.info('Login successful.');
         return true;
       })
       .catch((error) => {
-        this.log.error(formatRequestError(error));
+        if (!this.shuttingDown) {
+          this.log.error(formatRequestError(error));
+        }
         return false;
       });
     return loginSucceeded === true;
@@ -688,6 +718,9 @@ class Smartthings extends utils.Adapter {
     return true;
   }
   async refreshToken() {
+    if (this.shuttingDown) {
+      return false;
+    }
     if (this.tokenRefreshPromise) {
       return this.tokenRefreshPromise;
     }
@@ -705,6 +738,9 @@ class Smartthings extends utils.Adapter {
    * @returns {Promise<boolean>} Whether a usable session was persisted.
    */
   async performTokenRefresh() {
+    if (this.shuttingDown) {
+      return false;
+    }
     if (!this.session.refresh_token) {
       this.lastAuthFailureTerminal = true;
       this.lastAuthFailureType = 'terminal';
@@ -715,7 +751,7 @@ class Smartthings extends utils.Adapter {
     this.lastAuthFailureType = 'unknown';
     this.log.debug('Start refresh token');
     try {
-      const res = await this.requestClient({
+      const res = await this.requestApi({
         method: 'post',
         maxBodyLength: Infinity,
         url: 'https://eu-auth2.samsungosp.com/auth/oauth2/token',
@@ -738,6 +774,9 @@ class Smartthings extends utils.Adapter {
           grant_type: 'refresh_token',
         },
       });
+      if (this.shuttingDown) {
+        return false;
+      }
       const nextSession = mergeRefreshedSession(this.session, res && res.data);
       if (!nextSession) {
         this.lastAuthFailureType = classifyAuthError({
@@ -747,7 +786,13 @@ class Smartthings extends utils.Adapter {
         this.log.error('SmartThings refresh response contains no usable tokens');
         return false;
       }
+      if (this.shuttingDown) {
+        return false;
+      }
       await this.setStateAsync('authInformation.session', JSON.stringify(nextSession), true);
+      if (this.shuttingDown) {
+        return false;
+      }
       this.session = nextSession;
       this.config.token = nextSession.access_token;
       this.lastAuthFailureTerminal = false;
@@ -759,6 +804,9 @@ class Smartthings extends utils.Adapter {
       // succeeds if this refresh was triggered by a 401.
       return true;
     } catch (error) {
+      if (this.shuttingDown) {
+        return false;
+      }
       this.lastAuthFailureType = classifyAuthError(error);
       this.lastAuthFailureTerminal = this.lastAuthFailureType === 'terminal';
       this.log.error(formatRequestError(error));

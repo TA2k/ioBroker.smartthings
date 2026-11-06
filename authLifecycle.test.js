@@ -460,6 +460,80 @@ describe('SmartThings authentication lifecycle', () => {
     assert.deepEqual(adapter.rawResponseCache, {});
   });
 
+  it('does not persist login state when shutdown begins during the login request', async () => {
+    const adapter = createAdapter({
+      config: {
+        codeUrl: 'samsungconnect://samsungaccount/callback?action=authorize' +
+          '&code=2ab441a918ea13f5fbb2aa909d82bddba73359c90f2ad4f786228d7591728f37' +
+          '&retValue=9f6169181da8a3b4db4261a55a5fc7ab' +
+          '&state=af7708fea95b386df51c0ff3666a12e0',
+      },
+    });
+    /** @type {AbortSignal | undefined} */
+    let requestSignal;
+    /** @type {((value: unknown) => void) | undefined} */
+    let releaseRequest;
+    /** @type {() => void} */
+    let reportRequestStarted = () => {};
+    const requestStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportRequestStarted = () => resolve(); })
+    );
+    let requestCalls = 0;
+    adapter.requestClient = async (request) => {
+      requestCalls++;
+      requestSignal = request.signal;
+      reportRequestStarted();
+      return new Promise((resolve) => { releaseRequest = resolve; });
+    };
+    const loginResult = adapter.login();
+    await requestStarted;
+    await adapter.onUnload(() => {});
+    if (!requestSignal) throw new Error('expected the login request signal to be captured');
+    assert.equal(requestSignal.aborted, true);
+    if (!releaseRequest) throw new Error('expected the login request to be pending');
+    releaseRequest({ data: { userauth_token: 'userauth-token' } });
+    assert.equal(await loginResult, false);
+    assert.equal(requestCalls, 1);
+    assert.equal(adapter.states.some((entry) => entry[0] === 'authInformation.session'), false);
+    assert.deepEqual(adapter.session, {});
+    assert.equal(adapter.config.token, '');
+    assert.equal(adapter.logMessages.join(' ').includes('userauth-token'), false);
+  });
+
+  it('does not persist or mutate the session when shutdown begins during a token refresh', async () => {
+    const adapter = createAdapter({ config: { token: 'old-access' } });
+    adapter.session = { refresh_token: 'old-refresh', access_token: 'old-access', expires_in: 900 };
+    /** @type {AbortSignal | undefined} */
+    let requestSignal;
+    /** @type {((value: unknown) => void) | undefined} */
+    let releaseRequest;
+    /** @type {() => void} */
+    let reportRequestStarted = () => {};
+    const requestStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportRequestStarted = () => resolve(); })
+    );
+    adapter.requestClient = async (request) => {
+      requestSignal = request.signal;
+      reportRequestStarted();
+      return new Promise((resolve) => { releaseRequest = resolve; });
+    };
+    const refreshResult = adapter.refreshToken();
+    await requestStarted;
+    await adapter.onUnload(() => {});
+    if (!requestSignal) throw new Error('expected the refresh request signal to be captured');
+    assert.equal(requestSignal.aborted, true);
+    if (!releaseRequest) throw new Error('expected the refresh request to be pending');
+    releaseRequest({ data: { access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 1200 } });
+    assert.equal(await refreshResult, false);
+    assert.equal(adapter.config.token, 'old-access');
+    assert.equal(adapter.session.access_token, 'old-access');
+    assert.equal(adapter.session.refresh_token, 'old-refresh');
+    assert.equal(adapter.states.some((entry) => entry[0] === 'authInformation.session'), false);
+    assert.equal(adapter.lastAuthFailureTerminal, false);
+    assert.equal(adapter.lastAuthFailureType, 'unknown');
+    assert.equal(adapter.logMessages.join(' ').includes('new-access'), false);
+  });
+
   it('does not log raw device-list or status payloads', async () => {
     const adapter = createAdapter({ config: { token: 'access-token' } });
     adapter.requestClient = async (request) => {
