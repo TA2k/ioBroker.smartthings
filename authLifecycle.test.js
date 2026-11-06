@@ -438,6 +438,65 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(adapter.sseEventSource, null);
   });
 
+  it('closes an active SSE connection after a terminal authorization failure', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    adapter.requestClient = async () => ({ data: { subscriptionId: 'subscription-id' } });
+    assert.equal(await adapter.connectSSE(), true);
+    const eventSource = latestEventSource;
+    adapter.session = {};
+    adapter.handleUnauthorizedResponse();
+    assert.equal(eventSource.closed, true);
+    assert.equal(adapter.sseEventSource, null);
+    assert.equal(adapter.authorizationInvalid, true);
+    assert.equal(adapter.lastAuthFailureTerminal, true);
+    let requests = 0;
+    adapter.requestClient = async () => {
+      requests++;
+      return { data: { subscriptionId: 'other-subscription-id' } };
+    };
+    assert.equal(await adapter.connectSSE(), false);
+    assert.equal(requests, 0);
+    assert.equal(latestEventSource, eventSource);
+  });
+
+  it('keeps the SSE connection open for transient authentication and network failures', async () => {
+    const transientResponses = [
+      async () => ({ status: 200, data: { error: 'server_error' } }),
+      async () => { throw createHttpError(503); },
+    ];
+    for (const response of transientResponses) {
+      const adapter = createAdapter({ config: { token: 'access-token' } });
+      adapter.requestClient = async () => ({ data: { subscriptionId: 'subscription-id' } });
+      assert.equal(await adapter.connectSSE(), true);
+      const eventSource = latestEventSource;
+      adapter.session = { refresh_token: 'valid-refresh', expires_in: 3600 };
+      adapter.requestClient = response;
+      const scheduled = [];
+      adapter.scheduleTokenRefresh = (delay) => { scheduled.push(delay); };
+      await adapter.performTokenRefreshCycle();
+      assert.equal(eventSource.closed, false);
+      assert.equal(adapter.sseEventSource, eventSource);
+      assert.equal(adapter.authorizationInvalid, false);
+      assert.equal(adapter.lastAuthFailureTerminal, false);
+      assert.equal(adapter.lastAuthFailureType, 'transient');
+      assert.deepEqual(scheduled, [300000]);
+    }
+  });
+
+  it('handles a terminal authorization failure when SSE is already closed', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    adapter.requestClient = async () => ({ data: { subscriptionId: 'subscription-id' } });
+    assert.equal(await adapter.connectSSE(), true);
+    const eventSource = latestEventSource;
+    eventSource.close();
+    adapter.session = {};
+    assert.doesNotThrow(() => adapter.handleUnauthorizedResponse());
+    assert.equal(adapter.sseEventSource, null);
+    assert.equal(eventSource.closed, true);
+    assert.doesNotThrow(() => adapter.stopAuthenticatedOperations());
+    assert.equal(adapter.sseEventSource, null);
+  });
+
   it('aborts in-flight status requests and suppresses writes after shutdown', async () => {
     const adapter = createAdapter({ config: { token: 'access-token' } });
     /** @type {AbortSignal | undefined} */

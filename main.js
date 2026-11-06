@@ -190,6 +190,23 @@ class Smartthings extends utils.Adapter {
   }
 
   /**
+   * Close the active SSE connection. EventSource stops its automatic reconnect
+   * loop only after close(), so terminal authorization failures must not leave
+   * the connection open.
+   */
+  closeSseConnection() {
+    if (!this.sseEventSource) {
+      return;
+    }
+    try {
+      this.sseEventSource.close();
+    } catch {
+      this.log.warn('Unable to close SmartThings SSE cleanly');
+    }
+    this.sseEventSource = null;
+  }
+
+  /**
    * Stop authenticated background work after credentials are known to be
    * unusable. Keep the token in memory so this does not unexpectedly mutate
    * persisted configuration.
@@ -208,6 +225,7 @@ class Smartthings extends utils.Adapter {
       clearTimeout(this.refreshTimeout);
       this.refreshTimeout = null;
     }
+    this.closeSseConnection();
   }
 
   /**
@@ -542,7 +560,7 @@ class Smartthings extends utils.Adapter {
   }
 
   async connectSSE() {
-    if (this.shuttingDown) {
+    if (this.shuttingDown || this.authorizationInvalid) {
       return false;
     }
     const subscriptionId = await this.requestApi({
@@ -673,7 +691,7 @@ class Smartthings extends utils.Adapter {
       this.log.warn('SmartThings SSE subscription unavailable; continuing with scheduled polling');
       return false;
     }
-    if (this.shuttingDown) {
+    if (this.shuttingDown || this.authorizationInvalid) {
       return false;
     }
 
@@ -1166,14 +1184,7 @@ class Smartthings extends utils.Adapter {
     this.statusCoordinator.close();
     for (const controller of this.apiAbortControllers) controller.abort();
     this.apiAbortControllers.clear();
-    if (this.sseEventSource) {
-      try {
-        this.sseEventSource.close();
-      } catch {
-        this.log.warn('Unable to close SmartThings SSE cleanly');
-      }
-      this.sseEventSource = null;
-    }
+    this.closeSseConnection();
     if (this.refreshInterval) {
       clearTimeout(this.refreshInterval);
       this.refreshInterval = null;
