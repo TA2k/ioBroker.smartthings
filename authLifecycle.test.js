@@ -1,5 +1,7 @@
 'use strict';
 
+/* global globalThis */
+
 const assert = require('node:assert/strict');
 const Module = require('module');
 const mainFile = require.resolve('./main');
@@ -534,6 +536,51 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(adapter.logMessages.join(' ').includes('new-access'), false);
   });
 
+  it('does not schedule a status refresh when a command completes after shutdown', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    /** @type {AbortSignal | undefined} */
+    let requestSignal;
+    /** @type {(() => void) | undefined} */
+    let releaseRequest;
+    /** @type {() => void} */
+    let reportRequestStarted = () => {};
+    const requestStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportRequestStarted = () => resolve(); })
+    );
+    let updateCalls = 0;
+    adapter.updateDevices = async () => { updateCalls++; };
+    adapter.requestClient = async (request) => {
+      requestSignal = request.signal;
+      reportRequestStarted();
+      return new Promise((resolve) => { releaseRequest = () => resolve({ data: {} }); });
+    };
+    const timerSet = globalThis.setTimeout;
+    const scheduled = [];
+    try {
+      globalThis.setTimeout = (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      };
+      const commandResult = adapter.onStateChange(
+        'smartthings.0.device.capabilities.switch-on',
+        { val: true, ack: false },
+      );
+      await requestStarted;
+      await adapter.onUnload(() => {});
+      if (!requestSignal) throw new Error('expected the command request signal to be captured');
+      assert.equal(requestSignal.aborted, true);
+      if (!releaseRequest) throw new Error('expected the command request to be pending');
+      releaseRequest();
+      await commandResult;
+      assert.equal(scheduled.length, 0);
+      assert.equal(adapter.refreshTimeout, null);
+      assert.equal(updateCalls, 0);
+      assert.equal(adapter.authorizationInvalid, false);
+    } finally {
+      globalThis.setTimeout = timerSet;
+    }
+  });
+
   it('does not log raw device-list or status payloads', async () => {
     const adapter = createAdapter({ config: { token: 'access-token' } });
     adapter.requestClient = async (request) => {
@@ -656,6 +703,83 @@ describe('SmartThings authentication lifecycle', () => {
     assert.equal(await deviceListResult, false);
     assert.equal(requestCalls, 1);
     assert.equal(adapter.states.some((entry) => entry[0] === 'info.connection' && entry[1] === true), false);
+  });
+
+  it('suppresses late connection updates when shutdown begins during a device-list request', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    let requestCalls = 0;
+    /** @type {AbortSignal | undefined} */
+    let requestSignal;
+    /** @type {(() => void) | undefined} */
+    let failRequest;
+    /** @type {() => void} */
+    let reportRequestStarted = () => {};
+    const requestStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportRequestStarted = () => resolve(); })
+    );
+    adapter.requestClient = async (request) => {
+      requestCalls++;
+      requestSignal = request.signal;
+      reportRequestStarted();
+      return new Promise((resolve, reject) => {
+        failRequest = () => reject(createHttpError(503));
+      });
+    };
+    const deviceListResult = adapter.getDeviceList();
+    await requestStarted;
+    await adapter.onUnload(() => {});
+    const statesAfterUnload = adapter.states.length;
+    if (!requestSignal) throw new Error('expected the device-list request signal to be captured');
+    assert.equal(requestSignal.aborted, true);
+    if (!failRequest) throw new Error('expected the device-list request to be pending');
+    failRequest();
+    assert.equal(await deviceListResult, false);
+    assert.equal(requestCalls, 1);
+    assert.equal(adapter.states.length, statesAfterUnload);
+    assert.equal(adapter.logMessages.some((message) => message.includes('HTTP 503')), false);
+  });
+
+  it('cancels the device-list retry timer when shutdown begins during backoff', async () => {
+    const adapter = createAdapter({ config: { token: 'access-token' } });
+    let requestCalls = 0;
+    adapter.requestClient = async () => {
+      requestCalls++;
+      throw createHttpError(503);
+    };
+    const timerSet = globalThis.setTimeout;
+    const timerClear = globalThis.clearTimeout;
+    const scheduled = [];
+    const cancelled = [];
+    /** @type {() => void} */
+    let reportWaitStarted = () => {};
+    const waitStarted = /** @type {Promise<void>} */ (
+      new Promise((resolve) => { reportWaitStarted = () => resolve(); })
+    );
+    const waitForRetry = adapter.waitForRetry.bind(adapter);
+    adapter.waitForRetry = async (delay) => {
+      reportWaitStarted();
+      return waitForRetry(delay);
+    };
+    try {
+      globalThis.setTimeout = (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      };
+      globalThis.clearTimeout = (timer) => { cancelled.push(timer); };
+      const deviceListResult = adapter.getDeviceList();
+      await waitStarted;
+      assert.deepEqual(scheduled.map((entry) => entry.delay), [1000]);
+      const statesBeforeUnload = adapter.states.length;
+      await adapter.onUnload(() => {});
+      assert.deepEqual(cancelled, [1]);
+      assert.equal(await deviceListResult, false);
+      assert.equal(requestCalls, 1);
+      assert.equal(adapter.states.length, statesBeforeUnload + 1);
+      assert.equal(scheduled.length, 1);
+    } finally {
+      globalThis.setTimeout = timerSet;
+      globalThis.clearTimeout = timerClear;
+    }
   });
 
   it('does not start SSE or polling when shutdown begins after device-list validation', async () => {

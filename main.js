@@ -52,6 +52,8 @@ class Smartthings extends utils.Adapter {
     this.updateVirtualInterval = null;
     this.refreshInterval = null;
     this.refreshTimeout = null;
+    this.retryWaitTimeout = null;
+    this.retryWaitResolve = null;
     this.tokenRefreshPromise = null;
     this.tokenRefreshCyclePromise = null;
     this.tokenRefreshRetryAttempt = 0;
@@ -917,6 +919,9 @@ class Smartthings extends utils.Adapter {
         return true;
       })
       .catch(async (error) => {
+        if (this.shuttingDown) {
+          return false;
+        }
         this.setState('info.connection', false, true);
         this.log.error(formatRequestError(error));
         if (classifyAuthError(error) === 'transient' && attempt + 1 < MAX_DEVICE_LIST_ATTEMPTS && !this.shuttingDown) {
@@ -1039,12 +1044,45 @@ class Smartthings extends utils.Adapter {
   }
 
   /**
-   * Isolated for deterministic lifecycle tests without real delays.
+   * Wait before a bounded device-list retry. The pending timer is cancelled by
+   * onUnload() so shutdown neither starts another request nor keeps the
+   * process alive for the remaining backoff.
    * @param {number} delayMs Backoff delay.
    * @returns {Promise<void>}
    */
   async waitForRetry(delayMs) {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (this.shuttingDown) {
+      return;
+    }
+    await new Promise((resolve) => {
+      const finish = () => {
+        if (this.retryWaitTimeout) {
+          clearTimeout(this.retryWaitTimeout);
+          this.retryWaitTimeout = null;
+        }
+        if (this.retryWaitResolve === finish) {
+          this.retryWaitResolve = null;
+        }
+        resolve(undefined);
+      };
+      this.retryWaitResolve = finish;
+      this.retryWaitTimeout = setTimeout(finish, delayMs);
+    });
+  }
+
+  /**
+   * Release a pending device-list retry wait during shutdown.
+   */
+  cancelRetryWait() {
+    if (this.retryWaitTimeout) {
+      clearTimeout(this.retryWaitTimeout);
+      this.retryWaitTimeout = null;
+    }
+    if (this.retryWaitResolve) {
+      const resolveWait = this.retryWaitResolve;
+      this.retryWaitResolve = null;
+      resolveWait();
+    }
   }
 
   /**
@@ -1140,6 +1178,7 @@ class Smartthings extends utils.Adapter {
       clearTimeout(this.refreshInterval);
       this.refreshInterval = null;
     }
+    this.cancelRetryWait();
     try {
       this.setState('info.connection', false, true);
       this.refreshTimeout && clearTimeout(this.refreshTimeout);
@@ -1180,6 +1219,9 @@ class Smartthings extends utils.Adapter {
    * @param {ioBroker.State | null | undefined} state
    */
   async onStateChange(id, state) {
+    if (this.shuttingDown) {
+      return;
+    }
     if (state) {
       if (!state.ack) {
         if (this.authorizationInvalid) {
@@ -1200,6 +1242,9 @@ class Smartthings extends utils.Adapter {
 
         if (capadId === 'ocf' && commandId.startsWith('postOcfCommand')) {
           const commandObject = await this.getForeignObjectAsync(id).then((result) => result);
+          if (this.shuttingDown) {
+            return;
+          }
           if (commandObject) {
             const candidate = this.ocfDeviceFactory.getOcfCommandData(
               commandObject.native.deviceManufacturerCode,
@@ -1229,12 +1274,15 @@ class Smartthings extends utils.Adapter {
             return res.data;
           })
           .catch((error) => {
+            if (this.shuttingDown) {
+              return;
+            }
             if (error && typeof error === 'object' && error.response && error.response.status === 401) {
               this.handleUnauthorizedResponse();
             }
             this.log.error(formatRequestError(error));
           });
-        if (!this.authorizationInvalid) {
+        if (!this.shuttingDown && !this.authorizationInvalid) {
           clearTimeout(this.refreshTimeout);
           this.refreshTimeout = setTimeout(async () => {
             await this.updateDevices();
