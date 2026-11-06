@@ -9,6 +9,7 @@ const {
   getTokenRefreshDelayMs,
   hasAccessToken,
   mergeRefreshedSession,
+  isTerminalAuthError,
   parseExclusionList,
   parseStoredSession,
   formatRequestError,
@@ -86,6 +87,17 @@ describe('startupSafety', () => {
       expect(original.refresh_token).to.equal('old-refresh');
       expect(mergeRefreshedSession(original, { access_token: 'next', refresh_token: 'rotated' }).refresh_token).to.equal('rotated');
       expect(mergeRefreshedSession(original, { error: '401', refresh_token: 'bad' })).to.equal(null);
+    });
+
+    it('distinguishes terminal OAuth failures from temporary request failures', () => {
+      expect(isTerminalAuthError({ response: { status: 400 } })).to.equal(true);
+      expect(isTerminalAuthError({ response: { status: 401 } })).to.equal(true);
+      expect(isTerminalAuthError({ response: { status: 200, data: { error: 'invalid_grant' } } })).to.equal(true);
+      expect(isTerminalAuthError({ response: { status: 403, data: { error: 'invalid_token' } } })).to.equal(true);
+      expect(isTerminalAuthError({ response: { status: 403, data: { error: 'unauthorized_client' } } })).to.equal(true);
+      expect(isTerminalAuthError({ response: { status: 500 } })).to.equal(false);
+      expect(isTerminalAuthError({ code: 'ECONNRESET' })).to.equal(false);
+      expect(isTerminalAuthError('invalid_grant')).to.equal(false);
     });
   });
 

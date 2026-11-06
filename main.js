@@ -18,6 +18,7 @@ const {
   getTokenRefreshDelayMs,
   hasAccessToken,
   mergeRefreshedSession,
+  isTerminalAuthError,
   parseExclusionList,
   parseStoredSession,
   formatRequestError,
@@ -39,8 +40,12 @@ class Smartthings extends utils.Adapter {
     this.on('unload', this.onUnload.bind(this));
     this.requestClient = axios.create();
     this.updateInterval = null;
+    this.updateVirtualInterval = null;
     this.refreshInterval = null;
+    this.refreshTimeout = null;
     this.shuttingDown = false;
+    this.lastAuthFailureTerminal = false;
+    this.authorizationInvalid = false;
     this.reLoginTimeout = null;
     this.json2iob = new Json2iob(this);
     this.deviceArray = [];
@@ -103,6 +108,7 @@ class Smartthings extends utils.Adapter {
     }
 
     if (!authenticated || !hasAccessToken(this.config.token)) {
+      this.stopAuthenticatedOperations();
       this.log.info('Please enter a valid codeUrl or Samsung Smartthings Token');
       return;
     }
@@ -111,9 +117,10 @@ class Smartthings extends utils.Adapter {
     // SmartThings before starting polling and the SSE subscription.
     if (!await this.getDeviceList()) {
       this.log.warn('SmartThings device list unavailable; skipping polling and SSE');
-      this.setState('info.connection', false, true);
+      this.stopAuthenticatedOperations();
       return;
     }
+    this.authorizationInvalid = false;
 
     await this.connectSSE();
     await this.updateDevices();
@@ -127,6 +134,50 @@ class Smartthings extends utils.Adapter {
     }
     if (sessionAuthenticated) {
       this.scheduleTokenRefresh();
+    }
+  }
+
+  /**
+   * Mark API access unavailable while a refresh attempt is pending.
+   */
+  markAuthorizationUnavailable() {
+    this.authorizationInvalid = true;
+    this.setState('info.connection', false, true);
+  }
+
+  /**
+   * Stop authenticated background work after credentials are known to be
+   * unusable. Keep the token in memory so this does not unexpectedly mutate
+   * persisted configuration.
+   */
+  stopAuthenticatedOperations() {
+    this.markAuthorizationUnavailable();
+    if (this.updateInterval) {
+      clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
+    if (this.updateVirtualInterval) {
+      clearInterval(this.updateVirtualInterval);
+      this.updateVirtualInterval = null;
+    }
+    if (this.refreshTimeout) {
+      clearTimeout(this.refreshTimeout);
+      this.refreshTimeout = null;
+    }
+  }
+
+  /**
+   * Handle an API 401 without creating one refresh request per device. The
+   * one-shot scheduler replaces any existing refresh timer. A missing refresh
+   * token means the failure is terminal for the current configuration.
+   */
+  handleUnauthorizedResponse() {
+    this.markAuthorizationUnavailable();
+    if (this.session.refresh_token) {
+      this.scheduleTokenRefresh(0);
+    } else {
+      this.lastAuthFailureTerminal = true;
+      this.stopAuthenticatedOperations();
     }
   }
 
@@ -160,6 +211,9 @@ class Smartthings extends utils.Adapter {
       }
       if (refreshed) {
         this.scheduleTokenRefresh();
+      } else if (this.lastAuthFailureTerminal) {
+        this.log.error('SmartThings authorization expired; please authorize the adapter again');
+        this.stopAuthenticatedOperations();
       } else {
         this.log.warn('SmartThings token refresh failed; retrying in five minutes');
         this.scheduleTokenRefresh(300000);
@@ -487,24 +541,34 @@ class Smartthings extends utils.Adapter {
       },
     })
       .then((res) => {
-        this.log.debug(JSON.stringify(res.data));
-        return res.data.subscriptionId;
+        return res.data && res.data.subscriptionId;
       })
       .catch((error) => {
         this.log.error('Failed to create subscription');
         this.log.error(formatRequestError(error));
       });
 
-    const es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
-      fetch: (input, init) => fetch(input, {
-        ...init,
-        headers: {
-          ...init.headers,
-          Authorization: `Bearer ${this.config.token}`,
-          version: 'application/vnd.smartthings+json;v=20250122',
-        },
-      }),
-    });
+    if (!subscriptionId) {
+      this.log.warn('SmartThings SSE subscription unavailable; continuing with scheduled polling');
+      return false;
+    }
+
+    let es;
+    try {
+      es = new EventSource(`https://spigot-regional.api.smartthings.com/filters/${subscriptionId}/activate?filterRegion=eu-west-1`, {
+        fetch: (input, init) => fetch(input, {
+          ...init,
+          headers: {
+            ...init.headers,
+            Authorization: `Bearer ${this.config.token}`,
+            version: 'application/vnd.smartthings+json;v=20250122',
+          },
+        }),
+      });
+    } catch (error) {
+      this.log.error('Unable to initialize SmartThings SSE: ' + formatRequestError(error));
+      return false;
+    }
     es.onopen = () => {
       this.log.info('Connected to SmartThings SSE endpoint.');
     };
@@ -514,23 +578,22 @@ class Smartthings extends utils.Adapter {
     };
 
     es.onmessage = async (event) => {
-      this.log.debug('Received SSE event: ' + event.data);
+      if (this.authorizationInvalid || this.shuttingDown) {
+        return;
+      }
       try {
         const data = JSON.parse(event.data);
         // APK uses eventType field, not event
         if (data.eventType === 'DEVICE_EVENT' && data.deviceEvent) {
           const de = data.deviceEvent;
-          this.log.debug(`Device event: ${de.deviceId} ${de.capability}.${de.attribute} = ${de.value}`);
 
           // Update state directly from SSE event (real-time update)
           const statePath = `${de.deviceId}.status.components.main.${de.capability}.${de.attribute}.value`;
           if (de.stateChange) {
             await this.setStateAsync(statePath, de.value, true);
-            this.log.debug(`Updated state via SSE: ${statePath} = ${de.value}`);
           }
         } else if (data.eventType === 'DEVICE_HEALTH_EVENT' && data.deviceHealthEvent) {
-          const dhe = data.deviceHealthEvent;
-          this.log.debug(`Device health: ${dhe.deviceId} = ${dhe.status}`);
+          this.log.debug('Received SmartThings device health event');
         }
       } catch (error) {
         this.log.error('Error parsing SSE event data: ' + formatRequestError(error));
@@ -538,14 +601,19 @@ class Smartthings extends utils.Adapter {
     };
 
     es.addEventListener('DEVICE_EVENT', (event) => {
-      this.log.debug('Device event received via addEventListener: ' + event.data);
+      // Do not log named-event payloads because they may contain private
+      // device data. Canonical named-event processing is handled separately.
+      void event;
     });
+    return true;
   }
   async refreshToken() {
     if (!this.session.refresh_token) {
+      this.lastAuthFailureTerminal = true;
       this.log.debug('No refresh_token found');
       return false;
     }
+    this.lastAuthFailureTerminal = false;
     this.log.debug('Start refresh token');
     try {
       const res = await this.requestClient({
@@ -573,16 +641,29 @@ class Smartthings extends utils.Adapter {
       });
       const nextSession = mergeRefreshedSession(this.session, res && res.data);
       if (!nextSession) {
+        this.lastAuthFailureTerminal = isTerminalAuthError({
+          response: { status: res && res.status, data: res && res.data },
+        });
         this.log.error('SmartThings refresh response contains no usable tokens');
         return false;
       }
       await this.setStateAsync('authInformation.session', JSON.stringify(nextSession), true);
       this.session = nextSession;
       this.config.token = nextSession.access_token;
+      this.lastAuthFailureTerminal = false;
+      this.authorizationInvalid = false;
+      // A refreshed token is not proof that the SmartThings API is reachable.
+      // Keep the connection indicator offline until the next API request
+      // succeeds if this refresh was triggered by a 401.
       return true;
     } catch (error) {
+      this.lastAuthFailureTerminal = isTerminalAuthError(error);
       this.log.error(formatRequestError(error));
-      this.log.warn('SmartThings token refresh failed; reauthorization may be required');
+      if (this.lastAuthFailureTerminal) {
+        this.log.warn('SmartThings refresh credentials are no longer valid');
+      } else {
+        this.log.warn('SmartThings token refresh failed temporarily');
+      }
       return false;
     }
   }
@@ -601,15 +682,15 @@ class Smartthings extends utils.Adapter {
           this.log.error('SmartThings device list response is invalid');
           return false;
         }
-        this.log.debug(JSON.stringify(res.data));
         this.setState('info.connection', true, true);
+        this.authorizationInvalid = false;
         this.log.info(res.data.items.length + ' devices detected');
         for (const device of res.data.items) {
           if (!this.locationIds.includes(device.locationId)) {
             this.locationIds.push(device.locationId);
           }
           if (this.excludeDeviceSet.has(device.deviceId)) {
-            this.log.info('Ignore ' + device.deviceId);
+            this.log.info('Ignore configured SmartThings device');
             continue;
           }
           this.deviceArray.push({ id: device.deviceId, type: device.deviceTypeName });
@@ -647,7 +728,6 @@ class Smartthings extends utils.Adapter {
                 },
               })
                 .then(async (res) => {
-                  this.log.debug(JSON.stringify(res.data));
                   const idName = res.data.id;
                   Object.keys(res.data.commands).forEach(async (element) => {
                     const common = {
@@ -736,6 +816,9 @@ class Smartthings extends utils.Adapter {
   }
 
   async updateDevices(onlyVirtualSwitch) {
+    if (this.authorizationInvalid) {
+      return;
+    }
     const statusArray = [
       {
         path: 'status',
@@ -762,10 +845,10 @@ class Smartthings extends utils.Adapter {
             headers: headers,
           });
 
-          this.log.debug(JSON.stringify(res.data));
           if (!res.data) {
             continue;
           }
+          this.setState('info.connection', true, true);
           let data = res.data;
           let keys = Object.keys(data);
           if (keys.length === 1) {
@@ -797,12 +880,13 @@ class Smartthings extends utils.Adapter {
           this.rawResponseCache[cacheKey] = rawData;
           this.responseCache[cacheKey] = data;
         } catch (error) {
-          if (error.response && error.response.status === 401) {
+          if (error && typeof error === 'object' && error.response && error.response.status === 401) {
+            this.handleUnauthorizedResponse();
             this.log.info(element.path + ' receive 401 error. Please use new Token');
-            continue;
+            return;
           }
 
-          this.log.error(url);
+          this.log.error('Failed to update SmartThings device status');
           this.log.error(formatRequestError(error));
         }
       }
@@ -847,6 +931,10 @@ class Smartthings extends utils.Adapter {
   async onStateChange(id, state) {
     if (state) {
       if (!state.ack) {
+        if (this.authorizationInvalid) {
+          this.log.warn('SmartThings command ignored because authorization is invalid');
+          return;
+        }
         const idArray = id.split('.');
         const deviceId = idArray[2];
         idArray.splice(0, 4);
@@ -890,12 +978,17 @@ class Smartthings extends utils.Adapter {
             return res.data;
           })
           .catch((error) => {
+            if (error && typeof error === 'object' && error.response && error.response.status === 401) {
+              this.handleUnauthorizedResponse();
+            }
             this.log.error(formatRequestError(error));
           });
-        clearTimeout(this.refreshTimeout);
-        this.refreshTimeout = setTimeout(async () => {
-          await this.updateDevices();
-        }, 10 * 1000);
+        if (!this.authorizationInvalid) {
+          clearTimeout(this.refreshTimeout);
+          this.refreshTimeout = setTimeout(async () => {
+            await this.updateDevices();
+          }, 10 * 1000);
+        }
       }
     }
   }
