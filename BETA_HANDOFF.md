@@ -1,7 +1,21 @@
 # SmartThings Beta 1 – RC3 Handoff
 
-Stand: 6. November 2026  
-Status: **RC3-Integration zur Prüfung; keine Produktivfreigabe**
+Stand: 7. November 2026
+Status: **RC3 eingefroren und geprüft; keine Produktivfreigabe**
+
+## Kanonischer Stand
+
+| Feld | Wert |
+| --- | --- |
+| Branch | `integration/smartthings-rc3` |
+| Getesteter Code-Commit | `4a512ef3edbbb921dd185dbeae7a2087e09c1473` |
+| Tag | `beta1-rc3` (Branch-Head inkl. Dokumentation) |
+| Paketversion | `0.3.0` (unverändert) |
+
+`integration/smartthings-beta` und `integration/smartthings-rc3` zeigen auf
+denselben Code-Stand; es war kein zusätzlicher Merge, Rebase oder Cherry-Pick nötig.
+Details zu Funktionen, Tests und Rollback: [`RC3_RELEASE_NOTES.md`](RC3_RELEASE_NOTES.md).
+Livetest-Checkliste: [`RC3_LIVE_TEST.md`](RC3_LIVE_TEST.md).
 
 ## Herkunft
 
@@ -24,11 +38,21 @@ Status: **RC3-Integration zur Prüfung; keine Produktivfreigabe**
 
 ## Validation und offene Nachweise
 
-- Die früheren CI-Ergebnisse von RC2 und #97 gelten **nicht** automatisch für den RC3-Merge-Commit.
-- RC3 muss eigenständig Lint, JS-Regressionen, Package-, Unit- und Integrationstests erfolgreich bestehen.
-- Fokus des Praxistests: keine API-Kommandos beim Schreiben von Statuswerten, funktionierendes Schalten/Dimmen und OCF, SSE-/Polling-Updates, Geräteauswahl nach Save/Restart sowie Token-Refresh.
-- Die vollständige Projekt-TypeScript-Baseline ist weiterhin separat offen; gezielte Sicherheits-Typprüfung bleibt Teil der CI.
-- Der reale RC2-Test vom 6. November beobachtete Adapterstart, Wiederverwendung der Sitzung, 20 Geräte und sichtbare Geräteauswahl. Das ist **kein RC3-Feldtest**.
+- RC3 wurde eigenständig auf Commit `4a512ef` geprüft (Node `22.23.4`, npm `10.9.9`):
+  `npm run lint` erfolgreich, `npm run test:js` 96 passing, `npm run test:package`
+  43 passing, `npm run test:unit` 1 passing (deprecated Platzhalter),
+  `npm run test:integration` 2 passing (Exit 0, js-controller `7.2.5`),
+  `git diff --check` sauber.
+- `npm run check` bleibt eine bekannte Baseline: RC2 105 vs. RC3 108
+  TypeScript-Fehler. Die drei zusätzlichen Meldungen stammen aus
+  `commandRouting.test.js` und sind fehlende Node-Typdefinitionen derselben
+  Kategorie wie die bestehende Baseline – keine RC3-Code-Regression.
+- Fokus des Praxistests: keine API-Kommandos beim Schreiben von Statuswerten,
+  funktionierendes Schalten/Dimmen und OCF, SSE-/Polling-Updates,
+  Geräteauswahl nach Save/Restart sowie Token-Refresh.
+- Der reale RC2-Test vom 6. November beobachtete Adapterstart, Wiederverwendung
+  der Sitzung, 20 Geräte und sichtbare Geräteauswahl. Das ist **kein
+  RC3-Feldtest**; der RC3-Livetest steht gemäß `RC3_LIVE_TEST.md` noch aus.
 - Kein automatischer Release und keine Änderung an der npm-Paketversion `0.3.0`.
 
 ## Upstream-Strategie
@@ -37,4 +61,7 @@ PR #97 kann als eigenständiger Fix überprüft werden. PR #96 ist eine überlap
 
 ## Lokale Rückkehr auf RC2
 
-Der unveränderte RC2-Commit ist `dbd15227ca9451732d8d1d2bf7765a845893e76f`. Vor Installation eine ioBroker-Konfigurationssicherung erstellen. Eine produktive Instanz nicht ungeprüft parallel betreiben.
+Der unveränderte RC2-Commit ist `dbd15227ca9451732d8d1d2bf7765a845893e76f`.
+Vor Installation eine ioBroker-Konfigurationssicherung erstellen. Eine
+produktive Instanz nicht ungeprüft parallel betreiben. Die vollständige
+Rollback-Anleitung steht in [`RC3_RELEASE_NOTES.md`](RC3_RELEASE_NOTES.md).
